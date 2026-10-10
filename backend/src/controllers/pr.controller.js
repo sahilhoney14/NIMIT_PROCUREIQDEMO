@@ -38,7 +38,7 @@ function formatDate(value) {
 
 async function getPurchaseRequests(req, res) {
     try {
-        const [rows] = await db.query(`SELECT * FROM purchase_requests ORDER BY pr_id DESC`);
+        const [rows] = await db.query(`SELECT *, id AS pr_id FROM purchase_requests ORDER BY id DESC`);
         return res.json({ success: true, data: rows });
     } catch (error) {
         log(`Error fetching purchase requests: ${error.message}`);

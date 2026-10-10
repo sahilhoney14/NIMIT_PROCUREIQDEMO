@@ -145,7 +145,7 @@
                     </button>
                     <button class="submenu-item" data-page="edit-vendor">
                         <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                        <span>Edit Vendor</span>
+                        <span>Vendor Detail</span>
                     </button>
                 </div>
             </div>
@@ -358,21 +358,80 @@
             <div id="purchaseOrdersPage" class="page hidden">
                 <h1>Purchase Orders</h1>
                 <section class="entry-section">
-                    <div class="ot-filter-bar">
-                        <div class="ot-filter-pills" id="poStatusPills">
-                            <button type="button" class="ot-pill active" data-status="ALL">All</button>
-                            <button type="button" class="ot-pill" data-status="DRAFT">
-                                <span class="ot-pill-dot dot-draft"></span>Draft
-                            </button>
-                            <button type="button" class="ot-pill" data-status="ISSUED">
-                                <span class="ot-pill-dot dot-issued"></span>Issued
-                            </button>
-                            <button type="button" class="ot-pill" data-status="COMPLETED">
-                                <span class="ot-pill-dot dot-completed"></span>Completed
-                            </button>
-                            <button type="button" class="ot-pill" data-status="CANCELLED">
-                                <span class="ot-pill-dot dot-cancelled"></span>Cancelled
-                            </button>
+                    <div class="po-filter-container">
+                        <div class="po-filter-top-row">
+                            <!-- Search -->
+                            <div class="po-search-box">
+                                <svg class="po-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                                <input type="text" id="poSearchInput" class="po-search-input" placeholder="Search by PO number, vendor, item..." autocomplete="off">
+                            </div>
+
+                            <!-- Status Dropdown -->
+                            <div class="po-select-card">
+                                <label class="po-field-label" for="poStatusSelect">Status</label>
+                                <div class="po-select-wrap">
+                                    <select id="poStatusSelect" class="po-field-select">
+                                        <option value="ALL">All</option>
+                                        <option value="DRAFT">Draft</option>
+                                        <option value="ISSUED">Issued</option>
+                                        <option value="COMPLETED">Completed</option>
+                                        <option value="CANCELLED">Cancelled</option>
+                                    </select>
+                                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <!-- Vendor Dropdown -->
+                            <div class="po-select-card">
+                                <label class="po-field-label" for="poVendorSelect">Vendor / Party</label>
+                                <div class="po-select-wrap">
+                                    <select id="poVendorSelect" class="po-field-select">
+                                        <option value="ALL">All</option>
+                                    </select>
+                                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <!-- Date Range -->
+                            <div class="po-date-range-card">
+                                <svg class="po-calendar-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                                </svg>
+                                <div class="po-date-item">
+                                    <label class="po-date-sublabel" for="poDateFrom">From Date</label>
+                                    <input type="date" id="poDateFrom" class="po-date-field" title="From Date">
+                                </div>
+                                <span class="po-date-arrow">&rarr;</span>
+                                <div class="po-date-item">
+                                    <label class="po-date-sublabel" for="poDateTo">To Date</label>
+                                    <input type="date" id="poDateTo" class="po-date-field" title="To Date">
+                                </div>
+                            </div>
+
+                            <!-- Clear & Apply -->
+                            <button type="button" id="poFilterClearBtn" class="po-btn-clear">Clear</button>
+                            <button type="button" id="poFilterApplyBtn" class="po-btn-apply">Apply</button>
+                        </div>
+
+                        <!-- Status Pills Row -->
+                        <div class="po-filter-pills-row">
+                            <div class="po-filter-pills" id="poStatusPills">
+                                <button type="button" class="po-filter-pill active" data-status="ALL" data-label="All">All (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="DRAFT" data-label="Draft">Draft (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="ISSUED" data-label="Issued">Issued (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="COMPLETED" data-label="Completed">Completed (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="CANCELLED" data-label="Cancelled">Cancelled (0)</button>
+                            </div>
                         </div>
                     </div>
                     <div id="purchaseOrdersList" class="inquiry-list">Loading...</div>
@@ -383,73 +442,81 @@
             <div id="orderTrackingPage" class="page hidden">
                 <h1>Order Tracking</h1>
                 <section class="entry-section">
-                    <div class="ot-filter-bar">
-                        <div class="ot-filter-pills" id="otStatusPills">
-                            <button type="button" class="ot-pill active" data-status="ALL">All</button>
-                            <button type="button" class="ot-pill" data-status="OPEN">
-                                <span class="ot-pill-dot dot-open"></span>Open
-                            </button>
-                            <button type="button" class="ot-pill" data-status="VENDOR_SELECTED">
-                                <span class="ot-pill-dot dot-vendor-selected"></span>Vendor Selected
-                            </button>
-                            <button type="button" class="ot-pill" data-status="CLOSED">
-                                <span class="ot-pill-dot dot-closed"></span>Closed
-                            </button>
-                            <button type="button" class="ot-pill" data-status="CANCELLED">
-                                <span class="ot-pill-dot dot-cancelled"></span>Cancelled
-                            </button>
-                        </div>
-                        <div class="ot-filter-controls">
-                            <div class="ot-date-filter-wrap">
-                                <div class="ot-date-preset-wrap">
-                                    <svg class="ot-date-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                                        <line x1="16" y1="2" x2="16" y2="6"></line>
-                                        <line x1="8" y1="2" x2="8" y2="6"></line>
-                                        <line x1="3" y1="10" x2="21" y2="10"></line>
-                                    </svg>
-                                    <select id="orderTrackingDatePreset" class="ot-date-preset-select" title="Filter by date preset">
-                                        <option value="ALL">All Dates</option>
-                                        <option value="TODAY">Today</option>
-                                        <option value="YESTERDAY">Yesterday</option>
-                                        <option value="THIS_WEEK">This Week</option>
-                                        <option value="THIS_MONTH">This Month</option>
-                                        <option value="LAST_30_DAYS">Last 30 Days</option>
-                                        <option value="CUSTOM">Custom Range</option>
-                                    </select>
-                                    <svg class="ot-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <polyline points="6 9 12 15 18 9"></polyline>
-                                    </svg>
-                                </div>
-                                <div id="otCustomDateRange" class="ot-custom-date-wrap">
-                                    <div class="ot-date-input-group">
-                                        <label for="orderTrackingFromDate" class="ot-date-label">From</label>
-                                        <input type="date" id="orderTrackingFromDate" class="ot-date-input" title="From Date">
-                                    </div>
-                                    <span class="ot-date-separator">&ndash;</span>
-                                    <div class="ot-date-input-group">
-                                        <label for="orderTrackingToDate" class="ot-date-label">To</label>
-                                        <input type="date" id="orderTrackingToDate" class="ot-date-input" title="To Date">
-                                    </div>
-                                    <button type="button" id="orderTrackingDateClear" class="ot-date-clear-btn" title="Reset date filter" style="display:none;">&times;</button>
-                                </div>
-                            </div>
-                            <div class="ot-search-wrap">
-                                <svg class="ot-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <div class="po-filter-container ot-filter-container">
+                        <div class="po-filter-top-row">
+                            <!-- Search -->
+                            <div class="po-search-box">
+                                <svg class="po-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                 </svg>
-                                <input type="text" id="orderTrackingSearch" class="ot-search-input" placeholder="Search PR #, PO #, party, item..." autocomplete="off">
-                                <button type="button" id="orderTrackingSearchClear" class="ot-clear-btn" title="Clear search" style="display:none;">&times;</button>
+                                <input type="text" id="orderTrackingSearch" class="po-search-input" placeholder="Search by PR number, PO number, party, item..." autocomplete="off">
                             </div>
-                            <button type="button" id="orderTrackingExportBtn" class="ot-export-btn" title="Export Order Summary to Excel (.xlsx)">
-                                <svg class="ot-export-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                    <polyline points="7 10 12 15 17 10"></polyline>
-                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+
+                            <!-- Status Dropdown -->
+                            <div class="po-select-card">
+                                <label class="po-field-label" for="orderTrackingStatusSelect">Status</label>
+                                <div class="po-select-wrap">
+                                    <select id="orderTrackingStatusSelect" class="po-field-select">
+                                        <option value="ALL">All</option>
+                                        <option value="OPEN">Open</option>
+                                        <option value="VENDOR_SELECTED">Vendor Selected</option>
+                                        <option value="CLOSED">Closed</option>
+                                        <option value="CANCELLED">Cancelled</option>
+                                    </select>
+                                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <!-- Vendor / Party Dropdown -->
+                            <div class="po-select-card">
+                                <label class="po-field-label" for="orderTrackingPartySelect">Vendor / Party</label>
+                                <div class="po-select-wrap">
+                                    <select id="orderTrackingPartySelect" class="po-field-select">
+                                        <option value="ALL">All</option>
+                                    </select>
+                                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <!-- Date Range -->
+                            <div class="po-date-range-card">
+                                <svg class="po-calendar-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                                    <line x1="3" y1="10" x2="21" y2="10"></line>
                                 </svg>
-                                <span>Export Excel</span>
-                            </button>
+                                <div class="po-date-item">
+                                    <label class="po-date-sublabel" for="orderTrackingFromDate">From Date</label>
+                                    <input type="date" id="orderTrackingFromDate" class="po-date-field" title="From Date">
+                                </div>
+                                <span class="po-date-arrow">&rarr;</span>
+                                <div class="po-date-item">
+                                    <label class="po-date-sublabel" for="orderTrackingToDate">To Date</label>
+                                    <input type="date" id="orderTrackingToDate" class="po-date-field" title="To Date">
+                                </div>
+                            </div>
+
+                            <!-- Clear & Apply -->
+                            <button type="button" id="orderTrackingClearBtn" class="po-btn-clear">Clear</button>
+                            <button type="button" id="orderTrackingApplyBtn" class="po-btn-apply">Apply</button>
+                            <button type="button" id="orderTrackingExportBtn" class="ot-export-btn" style="display:none;"></button>
+                        </div>
+
+                        <!-- Status Pills Row -->
+                        <div class="po-filter-pills-row">
+                            <div class="po-filter-pills" id="otStatusPills">
+                                <button type="button" class="po-filter-pill active" data-status="ALL" data-label="All">All (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="OPEN" data-label="Open">Open (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="VENDOR_SELECTED" data-label="Vendor Selected">Vendor Selected (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="CLOSED" data-label="Closed">Closed (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="CANCELLED" data-label="Cancelled">Cancelled (0)</button>
+                            </div>
                         </div>
                     </div>
                     <div id="orderTrackingList" class="inquiry-list">Loading...</div>
@@ -486,6 +553,10 @@
                                 <div class="form-group">
                                     <label>Registration Date <span class="required-star">*</span></label>
                                     <input type="date" id="registration_date">
+                                </div>
+                                <div class="form-group">
+                                    <label>Vendor Code <span style="font-size:11px;color:#64748b;font-weight:normal;">(Auto-generated if empty)</span></label>
+                                    <input type="text" id="vendor_code" placeholder="e.g. NEE2627V001 (auto if empty)">
                                 </div>
                                 <div class="form-group">
                                     <label>Vendor Name <span class="required-star">*</span></label>
@@ -653,10 +724,10 @@
                         <div class="form-section">
                             <h3 class="form-section-title">Documents</h3>
                             <div class="vendor-documents">
-                                <div class="form-group"><label>GST Document</label><input type="file" id="excel_gst_document"></div>
-                                <div class="form-group"><label>PAN Document</label><input type="file" id="excel_pan_document"></div>
+                                <div class="form-group"><label>GST Document <span class="required-star">*</span></label><input type="file" id="excel_gst_document"></div>
+                                <div class="form-group"><label>PAN Document <span class="required-star">*</span></label><input type="file" id="excel_pan_document"></div>
                                 <div class="form-group"><label>MSME Document</label><input type="file" id="excel_msme_document"></div>
-                                <div class="form-group"><label>Last Year ITR</label><input type="file" id="excel_itr_last_year_document"></div>
+                                <div class="form-group"><label>Last Year ITR <span class="required-star">*</span></label><input type="file" id="excel_itr_last_year_document"></div>
                                 <div class="form-group"><label>Second Last Year ITR</label><input type="file" id="excel_itr_second_last_year_document"></div>
                                 <div class="form-group"><label>Third Last Year ITR</label><input type="file" id="excel_itr_third_last_year_document"></div>
                             </div>
@@ -673,29 +744,196 @@
 
             <!-- ── Vendor Performance ────────────────────────────── -->
             <div id="vendorPerformancePage" class="page hidden">
-                <h1>Vendor Performance</h1>
+                <div class="page-header" style="margin-bottom: 20px;">
+                    <h1>Vendor Performance</h1>
+                </div>
+
+                <!-- Filters Bar -->
+                <div class="vp-filter-bar ev-filter-bar">
+                    <div class="vp-search-box ev-search-box">
+                        <svg class="ev-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="vpSearchInput" placeholder="Search by Vendor Name or Vendor Code...">
+                        <button type="button" id="vpSearchClearBtn" class="ev-search-clear hidden" title="Clear search">✕</button>
+                    </div>
+                    <div class="vp-filter-group ev-filter-group">
+                        <select id="vpDeliveryFilter" title="Filter by On-Time Delivery %">
+                            <option value="">All Delivery Rates</option>
+                            <option value="high">High (≥ 80% On-Time)</option>
+                            <option value="medium">Average (50% - 79%)</option>
+                            <option value="low">Low (&lt; 50%)</option>
+                            <option value="none">No Deliveries Yet</option>
+                        </select>
+                        <select id="vpOrdersFilter" title="Filter by Orders">
+                            <option value="">All Orders</option>
+                            <option value="open">With Open Orders</option>
+                            <option value="has_orders">With Order History</option>
+                            <option value="no_orders">No Orders</option>
+                        </select>
+                        <select id="vpStatusFilter" title="Filter by Status">
+                            <option value="">All Statuses</option>
+                            <option value="active">Active Only</option>
+                            <option value="blacklisted">Blacklisted Only</option>
+                        </select>
+                        <select id="vpSortFilter" title="Sort Vendors">
+                            <option value="code_asc">Sort: Vendor Code</option>
+                            <option value="name_asc">Sort: Vendor Name (A-Z)</option>
+                            <option value="orders_desc">Sort: Total Orders (High-Low)</option>
+                            <option value="value_desc">Sort: Order Value (High-Low)</option>
+                            <option value="ontime_desc">Sort: On-Time % (High-Low)</option>
+                            <option value="lead_asc">Sort: Lead Time (Fastest)</option>
+                        </select>
+                        <button type="button" id="vpResetFiltersBtn" class="ev-btn-reset" title="Reset all filters">
+                            ↺ Reset
+                        </button>
+                    </div>
+                </div>
+
+                <div class="vp-table-meta" style="margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">
+                    <span id="vpResultsCount" style="font-size: 13px; color: #64748b; font-weight: 500;">Showing 0 vendors</span>
+                </div>
+
                 <div id="vendorPerformanceMessage" class="message"></div>
                 <div id="vendorPerformanceList"></div>
             </div>
 
             <div id="editVendorPage" class="page hidden">
 
-                <div class="page-header">
-                    <h2>Edit Vendor Details</h2>
+                <div class="page-header" style="margin-bottom: 20px;">
+                    <h2>Vendor Detail</h2>
                 </div>
 
-                <!-- Vendor Search -->
-                <div class="form-section" style="max-width:500px;margin-bottom:24px;">
-                    <div class="form-group">
-                        <label>Select Vendor</label>
-                        <select id="editVendorSelect">
-                            <option value="">-- Select a vendor --</option>
-                        </select>
+                <!-- ── 1. VENDOR LIST VIEW (Default) ──────────────────── -->
+                <div id="editVendorListView">
+                    <!-- Filters Bar -->
+                    <div class="ev-filter-bar">
+                        <div class="ev-search-box">
+                            <svg class="ev-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <input type="text" id="evSearchInput" placeholder="Search by Vendor Name, Code, Contact Person, GST, Phone, Email...">
+                            <button type="button" id="evSearchClearBtn" class="ev-search-clear hidden" title="Clear search">✕</button>
+                        </div>
+                        <div class="ev-filter-group">
+                            <select id="evRoleFilter">
+                                <option value="">All Commercial Roles</option>
+                            </select>
+                            <select id="evEntityFilter">
+                                <option value="">All Legal Entities</option>
+                            </select>
+                            <button type="button" id="evResetFiltersBtn" class="ev-btn-reset" title="Reset all filters">
+                                ↺ Reset
+                            </button>
+                            <div class="ev-export-dropdown" id="evExportDropdown">
+                                <button type="button" id="evExportDropdownBtn" class="ev-btn-export" title="Export Vendor Information">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                    </svg>
+                                    <span>Export</span>
+                                    <svg class="ev-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </button>
+                                <div id="evExportMenu" class="ev-export-menu hidden">
+                                    <button type="button" id="evExportExcelBtn" class="ev-export-item" title="Download Excel Spreadsheet (.xlsx)">
+                                        <svg class="ev-export-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                            <line x1="8" y1="13" x2="16" y2="13"></line>
+                                            <line x1="8" y1="17" x2="16" y2="17"></line>
+                                            <polyline points="10 9 9 9 8 9"></polyline>
+                                        </svg>
+                                        <div class="ev-export-info">
+                                            <span class="ev-export-title">Excel File</span>
+                                            <span class="ev-export-desc">.xlsx format with all fields</span>
+                                        </div>
+                                    </button>
+                                    <button type="button" id="evExportPdfBtn" class="ev-export-item" title="Download PDF Document (.pdf)">
+                                        <svg class="ev-export-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                                            <polyline points="10 9 9 9 8 9"></polyline>
+                                        </svg>
+                                        <div class="ev-export-info">
+                                            <span class="ev-export-title">PDF File</span>
+                                            <span class="ev-export-desc">.pdf printable report</span>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ev-table-meta">
+                        <span id="evResultsCount">Showing 0 vendors</span>
+                    </div>
+
+                    <!-- Vendor Table Card -->
+                    <div class="ev-table-card">
+                        <div class="table-container" style="overflow-x: auto;">
+                            <table class="ev-vendor-table" id="evVendorTable">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 65px; text-align: center;">No.</th>
+                                        <th style="width: 140px;">Vendor Code</th>
+                                        <th>Vendor Name &amp; Entity</th>
+                                        <th>Commercial Role</th>
+                                        <th>Office Contact</th>
+                                        <th>GST / PAN</th>
+                                        <th>Location</th>
+                                        <th style="text-align: center; width: 240px;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="evVendorTableBody">
+                                    <tr>
+                                        <td colspan="8" style="text-align: center; padding: 32px; color: #64748b;">
+                                            Loading vendors...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="evNoResults" class="ev-no-results hidden">
+                            <div class="ev-no-results-icon">🔍</div>
+                            <div class="ev-no-results-title">No vendors found</div>
+                            <p class="ev-no-results-desc">No vendors match your current search criteria or filters.</p>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Edit Form (hidden until vendor selected) -->
-                <div id="editVendorForm" class="hidden">
+                <!-- ── 2. VENDOR EDIT FORM CONTAINER (Hidden until Edit Vendor is clicked) ── -->
+                <div id="editVendorFormContainer" class="hidden">
+                    <div class="ev-editing-banner">
+                        <div class="ev-editing-info">
+                            <button type="button" id="evBackToListBtn" class="ev-btn-back">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                                    <polyline points="12 19 5 12 12 5"></polyline>
+                                </svg>
+                                Back to Vendor List
+                            </button>
+                            <div class="ev-editing-title-wrap">
+                                <span class="ev-editing-label">Currently Editing:</span>
+                                <strong id="evCurrentVendorTitle">-</strong>
+                                <span id="evCurrentVendorCodeBadge" class="ev-code-pill">-</span>
+                            </div>
+                        </div>
+                        <!-- Quick switcher dropdown -->
+                        <div class="ev-quick-switch">
+                            <label for="editVendorSelect">Quick Switch:</label>
+                            <select id="editVendorSelect">
+                                <option value="">-- Select a vendor --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Edit Form (hidden until vendor selected) -->
+                    <div id="editVendorForm" class="hidden">
 
                 <!-- Read-only identity strip -->
                     <div class="form-section">
@@ -765,11 +1003,11 @@
                         <h3 class="form-section-title">Basic Details</h3>
                         <div class="form-grid">
                             <div class="form-group">
-                                <label>Vendor Name</label>
+                                <label>Vendor Name <span class="required-star">*</span></label>
                                 <input type="text" id="ev-vendor_name">
                             </div>
                             <div class="form-group">
-                                <label>Commercial Role</label>
+                                <label>Commercial Role <span class="required-star">*</span></label>
                                 <input type="text" id="ev-commercial_role">
                             </div>
                         </div>
@@ -778,9 +1016,9 @@
                     <div class="form-section">
                         <h3 class="form-section-title">Address with Phone Numbers</h3>
                         <div class="form-grid">
-                            <div class="form-group full-width"><label>Office Address</label><input type="text" id="ev-office_address"></div>
-                            <div class="form-group"><label>Office Contact Name</label><input type="text" id="ev-office_contact_name"></div>
-                            <div class="form-group"><label>Office Contact Number</label><input type="text" id="ev-office_contact_number"></div>
+                            <div class="form-group full-width"><label>Office Address <span class="required-star">*</span></label><input type="text" id="ev-office_address"></div>
+                            <div class="form-group"><label>Office Contact Name <span class="required-star">*</span></label><input type="text" id="ev-office_contact_name"></div>
+                            <div class="form-group"><label>Office Contact Number <span class="required-star">*</span></label><input type="text" id="ev-office_contact_number"></div>
                             <div class="form-group full-width"><label>Factory Address</label><input type="text" id="ev-factory_address"></div>
                             <div class="form-group"><label>Factory Contact Name</label><input type="text" id="ev-factory_contact_name"></div>
                             <div class="form-group"><label>Factory Contact Number</label><input type="text" id="ev-factory_contact_number"></div>
@@ -796,10 +1034,10 @@
                     <div class="form-section">
                         <h3 class="form-section-title">Director / CEO / Management Team</h3>
                         <div class="form-grid">
-                            <div class="form-group"><label>Name</label><input type="text" id="ev-director_or_ceo_or_management_name"></div>
-                            <div class="form-group"><label>Designation</label><input type="text" id="ev-director_or_ceo_or_management_designation"></div>
-                            <div class="form-group"><label>Mobile No.</label><input type="text" id="ev-director_or_ceo_or_management_mobile_no"></div>
-                            <div class="form-group"><label>Email</label><input type="text" id="ev-director_or_ceo_or_management_email"></div>
+                            <div class="form-group"><label>Name <span class="required-star">*</span></label><input type="text" id="ev-director_or_ceo_or_management_name"></div>
+                            <div class="form-group"><label>Designation <span class="required-star">*</span></label><input type="text" id="ev-director_or_ceo_or_management_designation"></div>
+                            <div class="form-group"><label>Mobile No. <span class="required-star">*</span></label><input type="text" id="ev-director_or_ceo_or_management_mobile_no"></div>
+                            <div class="form-group"><label>Email <span class="required-star">*</span></label><input type="text" id="ev-director_or_ceo_or_management_email"></div>
                             <div class="form-group"><label>Web Address</label><input type="text" id="ev-director_or_ceo_or_management_web_address"></div>
                         </div>
                     </div>
@@ -807,25 +1045,25 @@
                     <div class="form-section">
                         <h3 class="form-section-title">Sales Team</h3>
                         <div class="form-grid">
-                            <div class="form-group"><label>Name</label><input type="text" id="ev-sales_team_name"></div>
-                            <div class="form-group"><label>Contact</label><input type="text" id="ev-sales_team_contact"></div>
-                            <div class="form-group"><label>Email</label><input type="text" id="ev-sales_team_email"></div>
+                            <div class="form-group"><label>Name <span class="required-star">*</span></label><input type="text" id="ev-sales_team_name"></div>
+                            <div class="form-group"><label>Contact <span class="required-star">*</span></label><input type="text" id="ev-sales_team_contact"></div>
+                            <div class="form-group"><label>Email <span class="required-star">*</span></label><input type="text" id="ev-sales_team_email"></div>
                         </div>
                     </div>
 
                     <div class="form-section">
                         <h3 class="form-section-title">Accounts Team</h3>
                         <div class="form-grid">
-                            <div class="form-group"><label>Name</label><input type="text" id="ev-accounts_team_name"></div>
-                            <div class="form-group"><label>Contact</label><input type="text" id="ev-accounts_team_contact"></div>
-                            <div class="form-group"><label>Email</label><input type="text" id="ev-accounts_team_email"></div>
+                            <div class="form-group"><label>Name <span class="required-star">*</span></label><input type="text" id="ev-accounts_team_name"></div>
+                            <div class="form-group"><label>Contact <span class="required-star">*</span></label><input type="text" id="ev-accounts_team_contact"></div>
+                            <div class="form-group"><label>Email <span class="required-star">*</span></label><input type="text" id="ev-accounts_team_email"></div>
                         </div>
                     </div>
 
                     <div class="form-section">
                         <h3 class="form-section-title">Branch Offices</h3>
                         <div class="form-grid">
-                            <div class="form-group full-width"><label>Branch 1 Address</label><input type="text" id="ev-branch_office_1_address"></div>
+                            <div class="form-group full-width"><label>Branch 1 Address <span class="required-star">*</span></label><input type="text" id="ev-branch_office_1_address"></div>
                             <div class="form-group"><label>Branch 1 Contact Name</label><input type="text" id="ev-branch_office_1_contact_name"></div>
                             <div class="form-group"><label>Branch 1 Contact Number</label><input type="text" id="ev-branch_office_1_contact_number"></div>
                             <div class="form-group full-width"><label>Branch 2 Address</label><input type="text" id="ev-branch_office_2_address"></div>
@@ -854,31 +1092,31 @@
                         </h3>
                         <div class="form-grid">
                             <div class="form-group">
-                                <label>Legal Entity</label>
+                                <label>Legal Entity <span class="required-star">*</span></label>
                                 <input type="text" id="ev-legal_entity">
                             </div>
                             <div class="form-group">
-                                <label>Bank Name</label>
+                                <label>Bank Name <span class="required-star">*</span></label>
                                 <input type="text" id="ev-bank_name">
                             </div>
                             <div class="form-group">
-                                <label>Account No.</label>
+                                <label>Account No. <span class="required-star">*</span></label>
                                 <input type="text" id="ev-bank_account_no">
                             </div>
                             <div class="form-group">
-                                <label>Branch Details</label>
+                                <label>Branch Details <span class="required-star">*</span></label>
                                 <input type="text" id="ev-bank_branch">
                             </div>
                             <div class="form-group">
-                                <label>Account Type</label>
+                                <label>Account Type <span class="required-star">*</span></label>
                                 <input type="text" id="ev-bank_account_type">
                             </div>
                             <div class="form-group">
-                                <label>IFSC / RTGS Code</label>
+                                <label>IFSC / RTGS Code <span class="required-star">*</span></label>
                                 <input type="text" id="ev-bank_ifsc">
                             </div>
                             <div class="form-group">
-                                <label>Confirm Your Password</label>
+                                <label>Confirm Your Password <span class="required-star">*</span></label>
                                 <input type="password" id="ev-bank_password" placeholder="Enter your admin password">
                             </div>
                         </div>
@@ -888,6 +1126,7 @@
                         <p id="editVendorBankMessage" style="margin-top:10px;color:#c00;"></p>
                     </div>
 
+                    </div>
                 </div>
             </div>
 
@@ -1573,6 +1812,42 @@
                     <button id="cancelSelectVendorBtn" type="button" class="option-button" style="padding: 9px 18px;">Cancel</button>
                     <button id="confirmSelectVendorBtn" type="button" class="primary-button" style="padding: 9px 20px; background: #0B57A4; color: #fff;">Confirm Selection</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Vendor Details View Modal ──────────────────────────────── -->
+    <div id="vendorDetailsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="vdModalVendorName">
+        <div class="modal-card ev-modal-card">
+            <div class="modal-header ev-modal-header">
+                <div class="ev-modal-header-info">
+                    <h2 style="margin: 0; font-size: 20px;">Vendor Profile Details</h2>
+                    <div class="ev-modal-header-meta">
+                        <strong id="vdModalVendorName" style="color: #0B57A4; font-size: 15px;">-</strong>
+                        <span id="vdModalCodeBadge" class="ev-code-pill">-</span>
+                        <span id="vdModalRoleBadge" class="ev-role-pill">-</span>
+                        <span id="vdModalEntityBadge" class="ev-tag-pill">-</span>
+                    </div>
+                </div>
+                <div class="ev-modal-header-actions">
+                    <button type="button" id="vdModalEditVendorBtn" class="primary-button" style="padding: 7px 14px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                        Edit This Vendor
+                    </button>
+                    <button type="button" id="closeVendorDetailsModalBtn" class="close-button" title="Close" aria-label="Close modal">✕</button>
+                </div>
+            </div>
+
+            <div class="ev-modal-body" id="vendorDetailsModalBody">
+                <!-- Dynamically populated detail cards -->
+            </div>
+
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; padding: 14px 24px; border-top: 1px solid #e2e8f0; background: #f8fafc; border-bottom-left-radius: 16px; border-bottom-right-radius: 16px;">
+                <button type="button" id="closeVendorDetailsModalFooterBtn" class="option-button" style="padding: 8px 18px;">Close</button>
+                <button type="button" id="vdModalEditVendorFooterBtn" class="primary-button" style="padding: 8px 18px;">Edit Vendor</button>
             </div>
         </div>
     </div>

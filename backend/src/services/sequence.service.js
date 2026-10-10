@@ -1,9 +1,3 @@
-const fs = require("fs");
-const path = require("path");
-const { getFileExtension } = require("../utils/sanitizers");
-
-const piFolder = path.resolve(__dirname, "../../proforma-invoice");
-
 function getFinancialYear(date = new Date()) {
     const month = date.getMonth() + 1;
     const year = date.getFullYear();
@@ -36,28 +30,8 @@ async function generatePoNumber(connection, prNumber) {
     return prNumber.replace("/PR/", "/PO/");
 }
 
-function getPiBaseName(poNumber) {
-    const piNumber = String(poNumber || "PI").replace(/PO/gi, "PI");
-    return piNumber.replace(/[\/\\:*?"<>|]/g, "_");
-}
-
-function getPiFileName(poNumber, originalName) {
-    return `${getPiBaseName(poNumber)}${getFileExtension(originalName)}`;
-}
-
-function findPiFilePath(poNumber) {
-    const baseName = getPiBaseName(poNumber);
-    if (!fs.existsSync(piFolder)) return null;
-    const match = fs.readdirSync(piFolder).find(fileName => path.parse(fileName).name === baseName);
-    return match ? path.join(piFolder, match) : null;
-}
-
 module.exports = {
     getFinancialYear,
     generatePrNumber,
-    generatePoNumber,
-    getPiBaseName,
-    getPiFileName,
-    findPiFilePath,
-    piFolder
+    generatePoNumber
 };

@@ -59,18 +59,14 @@ const logDb = mysql.createPool({
 
 const authServiceUrl = process.env.AUTH_SERVICE_URL;
 
-const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: {
-        fileSize: 10 * 1024 * 1024
-    }
-});
+const { securityHeaders, loginRateLimiter } = require("./middleware/security.middleware");
+const { memoryUpload: upload, excelUpload } = require("./middleware/upload.middleware");
 
 const vendorFolder = path.resolve(__dirname, "../vendor");
 const poFolder      = path.resolve(__dirname, "../purchase-orders");
-const piFolder      = path.resolve(__dirname, "../proforma-invoice");
 const headerImgPath = path.resolve(__dirname, "../PO header.png");
 
+app.use(securityHeaders);
 app.use(express.json());
 app.use(express.urlencoded({extended:false}));
 app.use(cookieParser());
@@ -391,28 +387,6 @@ function getFileExtension(filename) {
     return extension || ".pdf";
 }
 
-// Base file name for a PO's Proforma Invoice: the PO number with "PO" replaced
-// by "PI", sanitized for the filesystem. Shared by upload/status/download so
-// all three always agree on where a PO's PI lives.
-function getPiBaseName(poNumber) {
-    const piNumber = String(poNumber || "PI").replace(/PO/gi, "PI");
-    return piNumber.replace(/[\/\\:*?"<>|]/g, "_");
-}
-
-// Full saved file name (base name + the uploaded file's own extension).
-function getPiFileName(poNumber, originalName) {
-    return `${getPiBaseName(poNumber)}${getFileExtension(originalName)}`;
-}
-
-// Finds the previously uploaded PI for a PO, regardless of its extension.
-// Returns the full path, or null if nothing has been uploaded yet.
-function findPiFilePath(poNumber) {
-    const baseName = getPiBaseName(poNumber);
-    if (!fs.existsSync(piFolder)) return null;
-    const match = fs.readdirSync(piFolder).find(fileName => path.parse(fileName).name === baseName);
-    return match ? path.join(piFolder, match) : null;
-}
-
 // Derives the PO number from the PR number by swapping /PR/ for /PO/
 async function generatePoNumber(connection, prNumber) {
     return prNumber.replace("/PR/", "/PO/");
@@ -597,7 +571,38 @@ function validateVendorData(data, files) {
         "itr_last_year_document"
     ];
     const missingDocuments = requiredDocuments.filter(field => !files?.[field]?.[0]);
-    return { missingFields, missingDocuments };
+
+    const invalidFields = [];
+    if (data?.vendor_name) {
+        const vn = String(data.vendor_name).trim();
+        if (/^\d+$/.test(vn)) invalidFields.push("Vendor name cannot be only numbers");
+        if (!/[a-zA-Z]/.test(vn)) invalidFields.push("Vendor name must contain letters");
+    }
+    const personNameFields = [
+        "office_contact_name",
+        "director_or_ceo_or_management_name",
+        "sales_team_name",
+        "accounts_team_name",
+        "recommended_by",
+        "approved_by"
+    ];
+    for (const f of personNameFields) {
+        if (data?.[f] && /\d/.test(String(data[f]))) {
+            invalidFields.push(`${f.replace(/_/g, " ")} cannot contain numbers`);
+        }
+    }
+    const phoneFields = [
+        "office_contact_number",
+        "director_or_ceo_or_management_mobile_no",
+        "sales_team_contact",
+        "accounts_team_contact"
+    ];
+    for (const f of phoneFields) {
+        if (data?.[f] && !/^\d{10}$/.test(String(data[f]).replace(/\s+/g, ""))) {
+            invalidFields.push(`${f.replace(/_/g, " ")} must be a valid 10-digit number`);
+        }
+    }
+    return { missingFields, missingDocuments, invalidFields };
 }
 
 // Cleans the raw vendor data into the exact set of columns that get stored
@@ -616,6 +621,18 @@ async function saveVendor(connection, data, files) {
         [vendor.gst_number]
     );
     if (existingVendor.length > 0)throw new Error(`A vendor named "${existingVendor[0].vendor_name}" already exists with this GST number`);
+
+    const customVendorCode = cleanValue(data?.vendor_code);
+    if (customVendorCode) {
+        const [existingCode] = await connection.execute(
+            `SELECT vendor_id, vendor_name FROM vendor_oem_masters WHERE vendor_code = ? LIMIT 1`,
+            [customVendorCode]
+        );
+        if (existingCode.length > 0) {
+            throw new Error(`Vendor code "${customVendorCode}" already exists for vendor "${existingCode[0].vendor_name}"`);
+        }
+    }
+
     const { documentLocations, createdFiles, companyFolder } = saveVendorDocuments(files, vendor.vendor_name);
     try {
         const columns = [...VENDOR_FIELDS, ...VENDOR_DOCUMENT_FIELDS];
@@ -631,7 +648,7 @@ async function saveVendor(connection, data, files) {
         );
         const vendorId = result.insertId;
         const financialYear = getFinancialYear().replace("-", "");
-        const vendorCode = `NEE${financialYear}V${String(vendorId).padStart(3, "0")}`;
+        const vendorCode = customVendorCode || `NEE${financialYear}V${String(vendorId).padStart(3, "0")}`;
         await connection.execute(
             `UPDATE vendor_oem_masters SET vendor_code = ? WHERE vendor_id = ?`,
             [vendorCode, vendorId]
@@ -1131,16 +1148,18 @@ app.use(express.static(path.resolve(__dirname, "../../frontend/auth-service"), {
 // Protected storage & uploaded files (Procurement, Manager, Admin only)
 app.use("/backend/purchase-orders", verifyProcurement, express.static(poFolder));
 app.use("/backend/vendor", verifyProcurement, express.static(vendorFolder));
-app.use("/backend/proforma-invoice", verifyProcurement, express.static(piFolder));
 app.use("/storage", verifyProcurement, express.static(path.resolve(__dirname, "../storage")));
 
 // In-memory HTML template cache to eliminate repeated synchronous disk I/O
 const portalHtmlCache = new Map();
 function getPortalHtml(filePath) {
-    if (!portalHtmlCache.has(filePath)) {
-        portalHtmlCache.set(filePath, fs.readFileSync(filePath, "utf8"));
+    if (process.env.NODE_ENV === "production") {
+        if (!portalHtmlCache.has(filePath)) {
+            portalHtmlCache.set(filePath, fs.readFileSync(filePath, "utf8"));
+        }
+        return portalHtmlCache.get(filePath);
     }
-    return portalHtmlCache.get(filePath);
+    return fs.readFileSync(filePath, "utf8");
 }
 
 // Portal Dashboard Routes (Enforce auth, role verification, and inject credentials)
@@ -1213,7 +1232,7 @@ app.get("/login", async (req, res) => {
     return res.sendFile(path.resolve(__dirname, "../../frontend/auth-service/index.html"));
 });
 
-app.post("/login", authController.login);
+app.post("/login", loginRateLimiter, authController.login);
 app.post(["/refresh", "/api/auth/refresh"], authController.refresh);
 app.get("/verify", authController.verify);
 app.get("/logout", authController.logout);
@@ -1469,7 +1488,7 @@ app.post("/purchase-requests", verifyProcurement, async (req, res) => {
 });
 
 // POST /purchase-requests/import-preview - Reads an uploaded Excel sheet and returns editable PR rows without saving anything
-app.post("/purchase-requests/import-preview", verifyProcurement, upload.single("file"), async (req, res) => {
+app.post("/purchase-requests/import-preview", verifyProcurement, excelUpload.single("file"), async (req, res) => {
     log("POST /purchase-requests/import-preview - Excel preview requested");
     try {
         if (!req.file) {
@@ -1649,6 +1668,7 @@ app.get("/order-tracking", verifyProcurement, async (req, res) => {
     const offset = (page - 1) * limit;
     const statusParam = (req.query.status || "").trim().toUpperCase();
     const searchParam = (req.query.search || "").trim();
+    const partyParam = (req.query.party || req.query.vendor || "").trim();
     const singleDate = (req.query.date || "").trim();
     const fromDate = (req.query.from_date || req.query.from || singleDate).trim();
     const toDate = (req.query.to_date || req.query.to || singleDate).trim();
@@ -1666,10 +1686,15 @@ app.get("/order-tracking", verifyProcurement, async (req, res) => {
             }
         }
 
+        if (partyParam && partyParam !== "ALL") {
+            whereClauses.push("(party_name = ? OR vendor_name = ?)");
+            params.push(partyParam, partyParam);
+        }
+
         if (searchParam) {
-            whereClauses.push("(pr_number LIKE ? OR po_number LIKE ? OR party_name LIKE ? OR item_name LIKE ?)");
+            whereClauses.push("(pr_number LIKE ? OR po_number LIKE ? OR party_name LIKE ? OR vendor_name LIKE ? OR item_name LIKE ?)");
             const wild = `%${searchParam}%`;
-            params.push(wild, wild, wild, wild);
+            params.push(wild, wild, wild, wild, wild);
         }
 
         if (fromDate) {
@@ -1739,6 +1764,7 @@ app.get("/order-tracking", verifyProcurement, async (req, res) => {
                     pr.party_name,
                     pr.item_name,
                     po.po_number,
+                    po.vendor_name,
                     CASE
                         WHEN po.status = 'COMPLETED' THEN 'CLOSED'
                         WHEN po.status = 'CANCELLED' THEN 'CANCELLED'
@@ -1751,12 +1777,50 @@ app.get("/order-tracking", verifyProcurement, async (req, res) => {
             ${whereSql}
         `;
 
-        const [[countRows], [rows]] = await Promise.all([
+        const [[countRows], [rows], [statusCountRows], [partyRows]] = await Promise.all([
             db.query(`SELECT COUNT(*) AS total ${countFromSql}`, params),
-            db.query(`SELECT * ${baseFromSql} ORDER BY pr_id DESC LIMIT ${limit} OFFSET ${offset}`, params)
+            db.query(`SELECT * ${baseFromSql} ORDER BY pr_id DESC LIMIT ${limit} OFFSET ${offset}`, params),
+            db.query(`
+                SELECT
+                    COUNT(*) AS total_all,
+                    SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END) AS total_open,
+                    SUM(CASE WHEN status = 'VENDOR_SELECTED' THEN 1 ELSE 0 END) AS total_vendor_selected,
+                    SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END) AS total_closed,
+                    SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) AS total_cancelled
+                FROM (
+                    SELECT
+                        pr.id,
+                        CASE
+                            WHEN po.status = 'COMPLETED' THEN 'CLOSED'
+                            WHEN po.status = 'CANCELLED' THEN 'CANCELLED'
+                            ELSE vi.status
+                        END AS status
+                    FROM purchase_requests pr
+                    LEFT JOIN vendor_inquiries vi ON vi.pr_id = pr.id
+                    LEFT JOIN purchase_orders po ON po.pr_id = pr.id
+                ) all_ot
+            `),
+            db.query(`
+                SELECT DISTINCT name FROM (
+                    SELECT party_name AS name FROM purchase_requests WHERE party_name IS NOT NULL AND TRIM(party_name) != ''
+                    UNION
+                    SELECT vendor_name AS name FROM purchase_orders WHERE vendor_name IS NOT NULL AND TRIM(vendor_name) != ''
+                ) plist ORDER BY name ASC
+            `)
         ]);
         const total = countRows[0]?.total || 0;
         const totalPages = Math.max(1, Math.ceil(total / limit));
+
+        const sc = statusCountRows[0] || {};
+        const counts = {
+            ALL: Number(sc.total_all) || 0,
+            OPEN: Number(sc.total_open) || 0,
+            VENDOR_SELECTED: Number(sc.total_vendor_selected) || 0,
+            CLOSED: Number(sc.total_closed) || 0,
+            CANCELLED: Number(sc.total_cancelled) || 0
+        };
+
+        const parties = (partyRows || []).map(r => r.name).filter(Boolean);
 
         return res.json({
             success: true,
@@ -1768,7 +1832,9 @@ app.get("/order-tracking", verifyProcurement, async (req, res) => {
                 total_pages: totalPages,
                 has_prev: page > 1,
                 has_next: page < totalPages
-            }
+            },
+            counts,
+            parties
         });
     } catch (error) {
         console.error(error);
@@ -1784,6 +1850,7 @@ app.get("/order-tracking", verifyProcurement, async (req, res) => {
 app.get("/order-tracking/export", verifyProcurement, async (req, res) => {
     const statusParam = (req.query.status || "").trim().toUpperCase();
     const searchParam = (req.query.search || "").trim();
+    const partyParam = (req.query.party || req.query.vendor || "").trim();
     const singleDate = (req.query.date || "").trim();
     const fromDate = (req.query.from_date || req.query.from || singleDate).trim();
     const toDate = (req.query.to_date || req.query.to || singleDate).trim();
@@ -1801,10 +1868,15 @@ app.get("/order-tracking/export", verifyProcurement, async (req, res) => {
             }
         }
 
+        if (partyParam && partyParam !== "ALL") {
+            whereClauses.push("(party_name = ? OR vendor_name = ?)");
+            params.push(partyParam, partyParam);
+        }
+
         if (searchParam) {
-            whereClauses.push("(pr_number LIKE ? OR po_number LIKE ? OR party_name LIKE ? OR item_name LIKE ?)");
+            whereClauses.push("(pr_number LIKE ? OR po_number LIKE ? OR party_name LIKE ? OR vendor_name LIKE ? OR item_name LIKE ?)");
             const wild = `%${searchParam}%`;
-            params.push(wild, wild, wild, wild);
+            params.push(wild, wild, wild, wild, wild);
         }
 
         if (fromDate) {
@@ -2136,12 +2208,16 @@ app.post("/vendors", verifyProcurement, getVendorDocuments(), async (req, res) =
         const data = parseVendorData(req);
         const files = req.files || {};
         const validation = validateVendorData(data, files);
-        if (validation.missingFields.length || validation.missingDocuments.length) {
+        if (validation.missingFields.length || validation.missingDocuments.length || (validation.invalidFields && validation.invalidFields.length)) {
+            const errorMsg = validation.invalidFields?.length
+                ? validation.invalidFields.join(". ")
+                : "Vendor data validation failed";
             return res.status(400).json({
                 success: false,
-                message: "Vendor data validation failed",
+                message: errorMsg,
                 missing_fields: validation.missingFields,
-                missing_documents: validation.missingDocuments
+                missing_documents: validation.missingDocuments,
+                invalid_fields: validation.invalidFields
             });
         }
         await connection.beginTransaction();
@@ -2202,7 +2278,7 @@ app.get("/vendors/check-gst", verifyProcurement, async (req, res) => {
 });
 
 // POST /vendors/import-preview - Reads an uploaded vendor Excel (registration form or one-row table) and returns the parsed vendor without saving
-app.post("/vendors/import-preview", verifyProcurement, upload.single("file"), async (req, res) => {
+app.post("/vendors/import-preview", verifyProcurement, excelUpload.single("file"), async (req, res) => {
     log("POST /vendors/import-preview - Vendor Excel preview requested");
     try {
         if (!req.file) {
@@ -2241,12 +2317,16 @@ app.post("/vendors/import", verifyProcurement, getVendorDocuments(), async (req,
         const data = parseVendorData(req);
         const files = req.files || {};
         const validation = validateVendorData(data, files);
-        if (validation.missingFields.length || validation.missingDocuments.length) {
+        if (validation.missingFields.length || validation.missingDocuments.length || (validation.invalidFields && validation.invalidFields.length)) {
+            const errorMsg = validation.invalidFields?.length
+                ? validation.invalidFields.join(". ")
+                : "Vendor data validation failed";
             return res.status(400).json({
                 success: false,
-                message: "Vendor data validation failed",
+                message: errorMsg,
                 missing_fields: validation.missingFields,
-                missing_documents: validation.missingDocuments
+                missing_documents: validation.missingDocuments,
+                invalid_fields: validation.invalidFields
             });
         }
         await connection.beginTransaction();
@@ -2302,14 +2382,505 @@ app.get("/vendors", verifyProcurement, async (req, res) => {
 app.get("/vendors/all", verifyAdmin, async (req, res) => {
     try {
         const [rows] = await db.execute(
-            `SELECT vendor_id, vendor_code, vendor_name
-             FROM vendor_oem_masters
-             ORDER BY vendor_name ASC`
+            `SELECT * FROM vendor_oem_masters ORDER BY vendor_name ASC`
         );
         return res.json({ success: true, vendors: rows });
     } catch (error) {
         log(`Vendor list (all) fetch failed - ${error.message}`);
         return res.status(500).json({ success: false, message: "Failed to fetch vendors" });
+    }
+});
+
+// Helper: Build SQL query and parameters for vendor export based on active filters
+function buildVendorFilterQuery(req) {
+    const search = (req.query.search || "").trim();
+    const role = (req.query.role || "").trim();
+    const entity = (req.query.entity || "").trim();
+
+    const conditions = [];
+    const params = [];
+
+    if (role) {
+        conditions.push("commercial_role = ?");
+        params.push(role);
+    }
+    if (entity) {
+        conditions.push("legal_entity = ?");
+        params.push(entity);
+    }
+    if (search) {
+        conditions.push(`(
+            vendor_name LIKE ? OR
+            vendor_code LIKE ? OR
+            office_contact_name LIKE ? OR
+            office_contact_number LIKE ? OR
+            director_or_ceo_or_management_name LIKE ? OR
+            director_or_ceo_or_management_mobile_no LIKE ? OR
+            director_or_ceo_or_management_email LIKE ? OR
+            sales_team_name LIKE ? OR
+            sales_team_contact LIKE ? OR
+            sales_team_email LIKE ? OR
+            accounts_team_name LIKE ? OR
+            accounts_team_contact LIKE ? OR
+            accounts_team_email LIKE ? OR
+            gst_number LIKE ? OR
+            pan_number LIKE ? OR
+            bank_name LIKE ? OR
+            office_address LIKE ?
+        )`);
+        const searchPattern = `%${search}%`;
+        for (let i = 0; i < 17; i++) {
+            params.push(searchPattern);
+        }
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const sql = `SELECT * FROM vendor_oem_masters ${whereClause} ORDER BY vendor_name ASC`;
+    return { sql, params, search, role, entity };
+}
+
+// GET /vendors/export/excel - Exports complete vendor directory to Excel (.xlsx)
+app.get(["/vendors/export/excel", "/api/vendors/export/excel"], verifyProcurement, async (req, res) => {
+    try {
+        const { sql, params, search, role, entity } = buildVendorFilterQuery(req);
+        const [rows] = await db.execute(sql, params);
+
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = "ProcureIQ";
+        workbook.created = new Date();
+
+        const sheet = workbook.addWorksheet("Vendor Master", {
+            views: [{ showGridLines: true }]
+        });
+
+        // 1. Title Banner
+        sheet.mergeCells("A1:AY1");
+        const titleCell = sheet.getCell("A1");
+        titleCell.value = "NIMIT ENGINEERING — VENDOR MASTER & DIRECTORY REPORT";
+        titleCell.font = { name: "Segoe UI", size: 14, bold: true, color: { argb: "FFFFFFFF" } };
+        titleCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FF0F172A" }
+        };
+        titleCell.alignment = { vertical: "middle", horizontal: "center" };
+        sheet.getRow(1).height = 36;
+
+        // 2. Subtitle Banner
+        sheet.mergeCells("A2:AY2");
+        const metaCell = sheet.getCell("A2");
+        const now = new Date();
+        const dateTag = now.toISOString().slice(0, 10);
+        const filterRoleText = role || "All Commercial Roles";
+        const filterEntityText = entity || "All Legal Entities";
+        const filterSearchText = search ? ` | Search: "${search}"` : "";
+        metaCell.value = `Exported: ${now.toLocaleDateString("en-IN")} ${now.toLocaleTimeString("en-IN")} | Role: ${filterRoleText} | Entity: ${filterEntityText}${filterSearchText} | Total Records: ${rows.length}`;
+        metaCell.font = { name: "Segoe UI", size: 10, italic: true, color: { argb: "FF334155" } };
+        metaCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF1F5F9" }
+        };
+        metaCell.alignment = { vertical: "middle", horizontal: "center" };
+        sheet.getRow(2).height = 24;
+
+        sheet.getRow(3).height = 10; // blank row
+
+        // 3. Header Columns
+        const columns = [
+            { header: "No.", key: "sno", width: 8 },
+            { header: "Vendor Code", key: "vendor_code", width: 16 },
+            { header: "Vendor Name", key: "vendor_name", width: 32 },
+            { header: "Legal Entity", key: "legal_entity", width: 18 },
+            { header: "Commercial Role", key: "commercial_role", width: 20 },
+            { header: "Incorporation Year", key: "year_of_incorporation", width: 16 },
+            { header: "Registration Date", key: "registration_date", width: 16 },
+            { header: "GST Number", key: "gst_number", width: 20 },
+            { header: "PAN Number", key: "pan_number", width: 16 },
+            { header: "MSME Number", key: "msme_number", width: 18 },
+            { header: "Office Address", key: "office_address", width: 35 },
+            { header: "Office Contact Person", key: "office_contact_name", width: 22 },
+            { header: "Office Contact Number", key: "office_contact_number", width: 18 },
+            { header: "Management / Director", key: "director_or_ceo_or_management_name", width: 24 },
+            { header: "Designation", key: "director_or_ceo_or_management_designation", width: 18 },
+            { header: "Management Mobile", key: "director_or_ceo_or_management_mobile_no", width: 18 },
+            { header: "Management Email", key: "director_or_ceo_or_management_email", width: 26 },
+            { header: "Website", key: "director_or_ceo_or_management_web_address", width: 26 },
+            { header: "Sales Contact Name", key: "sales_team_name", width: 22 },
+            { header: "Sales Contact Phone", key: "sales_team_contact", width: 18 },
+            { header: "Sales Email", key: "sales_team_email", width: 26 },
+            { header: "Accounts Contact Name", key: "accounts_team_name", width: 22 },
+            { header: "Accounts Contact Phone", key: "accounts_team_contact", width: 18 },
+            { header: "Accounts Email", key: "accounts_team_email", width: 26 },
+            { header: "Bank Name", key: "bank_name", width: 24 },
+            { header: "Bank Branch", key: "bank_branch", width: 20 },
+            { header: "Bank Account No.", key: "bank_account_no", width: 22 },
+            { header: "IFSC Code", key: "bank_ifsc", width: 16 },
+            { header: "Account Type", key: "bank_account_type", width: 16 },
+            { header: "Factory Address", key: "factory_address", width: 30 },
+            { header: "Factory Contact Person", key: "factory_contact_name", width: 20 },
+            { header: "Factory Contact Phone", key: "factory_contact_number", width: 18 },
+            { header: "Warehouse Address", key: "warehouse_address", width: 30 },
+            { header: "Warehouse Contact Person", key: "warehouse_contact_name", width: 20 },
+            { header: "Warehouse Contact Phone", key: "warehouse_contact_number", width: 18 },
+            { header: "Workshop Address", key: "workshop_address", width: 30 },
+            { header: "Workshop Contact Person", key: "workshop_contact_name", width: 20 },
+            { header: "Workshop Contact Phone", key: "workshop_contact_number", width: 18 },
+            { header: "Turnover Year 1", key: "turnover_year_1", width: 15 },
+            { header: "Turnover Value 1", key: "turnover_value_1", width: 18 },
+            { header: "Turnover Year 2", key: "turnover_year_2", width: 15 },
+            { header: "Turnover Value 2", key: "turnover_value_2", width: 18 },
+            { header: "Turnover Year 3", key: "turnover_year_3", width: 15 },
+            { header: "Turnover Value 3", key: "turnover_value_3", width: 18 },
+            { header: "Branch 1 Address", key: "branch_office_1_address", width: 26 },
+            { header: "Branch 1 Contact", key: "branch_office_1_contact_name", width: 18 },
+            { header: "Branch 2 Address", key: "branch_office_2_address", width: 26 },
+            { header: "Branch 2 Contact", key: "branch_office_2_contact_name", width: 18 },
+            { header: "Branch 3 Address", key: "branch_office_3_address", width: 26 },
+            { header: "Branch 3 Contact", key: "branch_office_3_contact_name", width: 18 },
+            { header: "Status", key: "status", width: 14 }
+        ];
+
+        const headerRow = sheet.getRow(4);
+        headerRow.height = 28;
+        columns.forEach((col, idx) => {
+            const cell = headerRow.getCell(idx + 1);
+            cell.value = col.header;
+            cell.font = { name: "Segoe UI", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
+            cell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FF0B57A4" }
+            };
+            cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+            cell.border = {
+                top: { style: "thin", color: { argb: "FF94A3B8" } },
+                left: { style: "thin", color: { argb: "FF94A3B8" } },
+                bottom: { style: "medium", color: { argb: "FF0F172A" } },
+                right: { style: "thin", color: { argb: "FF94A3B8" } }
+            };
+            sheet.getColumn(idx + 1).width = col.width;
+        });
+
+        // 4. Populate rows
+        let currentRowIdx = 5;
+        rows.forEach((row, idx) => {
+            const dataRow = sheet.getRow(currentRowIdx);
+            dataRow.height = 22;
+
+            const isEven = idx % 2 === 0;
+            const bgArgb = isEven ? "FFFFFFFF" : "FFF8FAFC";
+
+            let regDateStr = "—";
+            if (row.registration_date) {
+                regDateStr = row.registration_date instanceof Date
+                    ? row.registration_date.toISOString().slice(0, 10)
+                    : String(row.registration_date).slice(0, 10);
+            }
+
+            const values = [
+                idx + 1,
+                row.vendor_code || "—",
+                row.vendor_name || "—",
+                row.legal_entity || "—",
+                row.commercial_role || "—",
+                row.year_of_incorporation || "—",
+                regDateStr,
+                row.gst_number || "—",
+                row.pan_number || "—",
+                row.msme_number || "—",
+                row.office_address || "—",
+                row.office_contact_name || "—",
+                row.office_contact_number || "—",
+                row.director_or_ceo_or_management_name || "—",
+                row.director_or_ceo_or_management_designation || "—",
+                row.director_or_ceo_or_management_mobile_no || "—",
+                row.director_or_ceo_or_management_email || "—",
+                row.director_or_ceo_or_management_web_address || "—",
+                row.sales_team_name || "—",
+                row.sales_team_contact || "—",
+                row.sales_team_email || "—",
+                row.accounts_team_name || "—",
+                row.accounts_team_contact || "—",
+                row.accounts_team_email || "—",
+                row.bank_name || "—",
+                row.bank_branch || "—",
+                row.bank_account_no || "—",
+                row.bank_ifsc || "—",
+                row.bank_account_type || "—",
+                row.factory_address || "—",
+                row.factory_contact_name || "—",
+                row.factory_contact_number || "—",
+                row.warehouse_address || "—",
+                row.warehouse_contact_name || "—",
+                row.warehouse_contact_number || "—",
+                row.workshop_address || "—",
+                row.workshop_contact_name || "—",
+                row.workshop_contact_number || "—",
+                row.turnover_year_1 || "—",
+                row.turnover_value_1 || "—",
+                row.turnover_year_2 || "—",
+                row.turnover_value_2 || "—",
+                row.turnover_year_3 || "—",
+                row.turnover_value_3 || "—",
+                row.branch_office_1_address || "—",
+                row.branch_office_1_contact_name || "—",
+                row.branch_office_2_address || "—",
+                row.branch_office_2_contact_name || "—",
+                row.branch_office_3_address || "—",
+                row.branch_office_3_contact_name || "—",
+                row.is_blacklisted ? "Blacklisted" : "Active"
+            ];
+
+            values.forEach((val, colIdx) => {
+                const cell = dataRow.getCell(colIdx + 1);
+                cell.value = val;
+                cell.font = { name: "Segoe UI", size: 9.5, color: { argb: "FF0F172A" } };
+                cell.fill = {
+                    type: "pattern",
+                    pattern: "solid",
+                    fgColor: { argb: bgArgb }
+                };
+                cell.border = {
+                    top: { style: "thin", color: { argb: "FFE2E8F0" } },
+                    left: { style: "thin", color: { argb: "FFE2E8F0" } },
+                    bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+                    right: { style: "thin", color: { argb: "FFE2E8F0" } }
+                };
+                cell.alignment = {
+                    vertical: "middle",
+                    horizontal: colIdx === 0 ? "center" : "left"
+                };
+            });
+
+            currentRowIdx++;
+        });
+
+        if (currentRowIdx > 5) {
+            sheet.autoFilter = `A4:AY${currentRowIdx - 1}`;
+        }
+
+        const filename = `Vendor_Directory_${dateTag}.xlsx`;
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        await workbook.xlsx.write(res);
+        return res.end();
+    } catch (error) {
+        console.error(error);
+        log(`Vendor Excel export failed - ${error.message}`);
+        return res.status(500).json({ success: false, message: "Failed to export vendor Excel file" });
+    }
+});
+
+// GET /vendors/export/pdf - Exports formatted vendor directory report to PDF (.pdf)
+app.get(["/vendors/export/pdf", "/api/vendors/export/pdf"], verifyProcurement, async (req, res) => {
+    try {
+        const { sql, params, search, role, entity } = buildVendorFilterQuery(req);
+        const [rows] = await db.execute(sql, params);
+
+        const doc = new PDFDocument({
+            size: "A4",
+            layout: "landscape",
+            margins: { top: 20, bottom: 20, left: 20, right: 20 },
+            bufferPages: true
+        });
+
+        const now = new Date();
+        const dateTag = now.toISOString().slice(0, 10);
+        const filename = `Vendor_Directory_${dateTag}.pdf`;
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        doc.pipe(res);
+
+        const pageWidth = 841.89;
+        const pageHeight = 595.28;
+        const marginLeft = 20;
+        const contentWidth = pageWidth - (marginLeft * 2); // 801.89 pt
+
+        function drawPageHeader() {
+            // 1. Top Header Banner
+            doc.rect(marginLeft, 20, contentWidth, 44).fill("#0F172A");
+
+            // Title
+            doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(13.5);
+            doc.text("PROCUREIQ — VENDOR MASTER DIRECTORY", marginLeft + 14, 28, { width: contentWidth - 28, lineBreak: false });
+
+            // Subtitle
+            doc.font("Helvetica").fontSize(8).fillColor("#94A3B8");
+            const filterInfo = `Generated: ${now.toLocaleDateString("en-IN")} ${now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}  |  Role: ${role || "All"}  |  Entity: ${entity || "All"}${search ? `  |  Search: "${search}"` : ""}  |  Records: ${rows.length}`;
+            doc.text(filterInfo, marginLeft + 14, 46, { width: contentWidth - 28, lineBreak: false });
+
+            // 2. Table Column Header Bar
+            const headerY = 72;
+            doc.rect(marginLeft, headerY, contentWidth, 24).fill("#1E293B");
+
+            const colDefs = [
+                { title: "No.", x: marginLeft + 2, w: 24, align: "center" },
+                { title: "Vendor Code", x: marginLeft + 28, w: 70 },
+                { title: "Vendor Name & Entity", x: marginLeft + 100, w: 138 },
+                { title: "Commercial Role", x: marginLeft + 240, w: 76, align: "center" },
+                { title: "Office Contact", x: marginLeft + 318, w: 98 },
+                { title: "Email & Contact Person", x: marginLeft + 418, w: 116 },
+                { title: "GST / PAN", x: marginLeft + 536, w: 88 },
+                { title: "Location", x: marginLeft + 626, w: 92 },
+                { title: "Bank Details", x: marginLeft + 720, w: 80 }
+            ];
+
+            doc.font("Helvetica-Bold").fontSize(8).fillColor("#FFFFFF");
+            colDefs.forEach(c => {
+                doc.text(c.title, c.x, headerY + 7.5, { width: c.w, align: c.align || "left", lineBreak: false });
+            });
+
+            return headerY + 24; // 96
+        }
+
+        function parseLocation(addr) {
+            if (!addr) return { line1: "—", line2: "—" };
+            const clean = addr.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+            const parts = clean.split(",").map(s => s.trim()).filter(Boolean);
+            if (parts.length >= 2) {
+                const line2 = parts.slice(-2).join(", ");
+                const line1 = parts.slice(0, -2).join(", ") || parts[0];
+                return { line1, line2 };
+            }
+            const cityMatch = clean.match(/^(.*?)\s+(Vadodara|Ahmedabad|Surat|Mumbai|Delhi|Kiriburu|Jharkhand|Gujarat)(.*)$/i);
+            if (cityMatch) {
+                return {
+                    line1: cityMatch[1].trim(),
+                    line2: (cityMatch[2] + " " + cityMatch[3]).trim()
+                };
+            }
+            return { line1: clean, line2: "Office" };
+        }
+
+        function parseBank(bank, branch) {
+            const bName = (bank || "—").trim();
+            const capBank = bName.replace(/\b\w/g, c => c.toUpperCase());
+            const bBranch = (branch || "").trim();
+            const capBranch = bBranch ? bBranch.replace(/\b\w/g, c => c.toUpperCase()) : "—";
+            return { line1: capBank, line2: capBranch };
+        }
+
+        let currentY = drawPageHeader();
+        const rowHeight = 44;
+        const maxY = pageHeight - 38;
+
+        rows.forEach((v, idx) => {
+            if (currentY + rowHeight > maxY) {
+                doc.addPage();
+                currentY = drawPageHeader();
+            }
+
+            const isEven = idx % 2 === 0;
+            const fillBg = isEven ? "#FFFFFF" : "#F8FAFC";
+            doc.rect(marginLeft, currentY, contentWidth, rowHeight).fill(fillBg);
+            doc.rect(marginLeft, currentY, contentWidth, rowHeight).strokeColor("#E2E8F0").lineWidth(0.5).stroke();
+
+            // 1. No. (Vertically Centered)
+            doc.font("Helvetica").fontSize(8).fillColor("#64748B");
+            doc.text(String(idx + 1), marginLeft + 2, currentY + 16, { width: 24, align: "center", lineBreak: false });
+
+            // 2. Vendor Code ONLY (Vertically Centered, NO status / %l Active)
+            doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0B57A4");
+            doc.text(v.vendor_code || "—", marginLeft + 28, currentY + 16, { width: 70, lineBreak: false, ellipsis: true });
+
+            // 3. Vendor Name & Legal Entity
+            doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0F172A");
+            doc.text(v.vendor_name || "—", marginLeft + 100, currentY + 8, { width: 138, lineBreak: false, ellipsis: true });
+            doc.font("Helvetica").fontSize(7).fillColor("#64748B");
+            const entityText = [v.legal_entity, v.year_of_incorporation ? `Est. ${v.year_of_incorporation}` : ""].filter(Boolean).join(" • ");
+            doc.text(entityText || "—", marginLeft + 100, currentY + 23, { width: 138, lineBreak: false, ellipsis: true });
+
+            // 4. Commercial Role (Vertically Centered)
+            doc.font("Helvetica-Bold").fontSize(8).fillColor("#334155");
+            doc.text(v.commercial_role || "—", marginLeft + 240, currentY + 16, { width: 76, align: "center", lineBreak: false, ellipsis: true });
+
+            // 5. Office Contact
+            doc.font("Helvetica-Bold").fontSize(8).fillColor("#0F172A");
+            doc.text(v.office_contact_name || "—", marginLeft + 318, currentY + 8, { width: 98, lineBreak: false, ellipsis: true });
+            doc.font("Helvetica").fontSize(7.5).fillColor("#64748B");
+            doc.text(v.office_contact_number || "—", marginLeft + 318, currentY + 23, { width: 98, lineBreak: false, ellipsis: true });
+
+            // 6. Key Person & Email
+            const mgmtEmail = v.director_or_ceo_or_management_email || v.sales_team_email || "—";
+            const mgmtName = v.director_or_ceo_or_management_name || v.sales_team_name || "—";
+            doc.font("Helvetica").fontSize(7.5).fillColor("#2563EB");
+            doc.text(mgmtEmail, marginLeft + 418, currentY + 8, { width: 116, lineBreak: false, ellipsis: true });
+            doc.font("Helvetica").fontSize(7).fillColor("#64748B");
+            doc.text(mgmtName, marginLeft + 418, currentY + 23, { width: 116, lineBreak: false, ellipsis: true });
+
+            // 7. GST / PAN
+            doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#0F172A");
+            doc.text(`GST: ${v.gst_number || "—"}`, marginLeft + 536, currentY + 8, { width: 88, lineBreak: false, ellipsis: true });
+            doc.font("Helvetica").fontSize(7).fillColor("#64748B");
+            doc.text(`PAN: ${v.pan_number || "—"}`, marginLeft + 536, currentY + 23, { width: 88, lineBreak: false, ellipsis: true });
+
+            // 8. Location (Separated & Dedicated Column)
+            const loc = parseLocation(v.office_address);
+            doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#0F172A");
+            doc.text(loc.line1, marginLeft + 626, currentY + 8, { width: 92, lineBreak: false, ellipsis: true });
+            doc.font("Helvetica").fontSize(7).fillColor("#64748B");
+            doc.text(loc.line2, marginLeft + 626, currentY + 23, { width: 92, lineBreak: false, ellipsis: true });
+
+            // 9. Bank Details (Separated & Dedicated Column)
+            const bank = parseBank(v.bank_name, v.bank_branch);
+            doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#0F172A");
+            doc.text(bank.line1, marginLeft + 720, currentY + 8, { width: 80, lineBreak: false, ellipsis: true });
+            doc.font("Helvetica").fontSize(7).fillColor("#64748B");
+            doc.text(bank.line2, marginLeft + 720, currentY + 23, { width: 80, lineBreak: false, ellipsis: true });
+
+            currentY += rowHeight;
+        });
+
+        // Small bottom summary bar if space permits
+        if (currentY + 24 < maxY) {
+            doc.rect(marginLeft, currentY + 4, contentWidth, 18).fill("#F1F5F9");
+            doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#475569");
+            doc.text(`Total Records: ${rows.length}   •   ProcureIQ Master Vendor Directory`, marginLeft + 12, currentY + 9, { width: contentWidth - 24, align: "left", lineBreak: false });
+        }
+
+        // Add page numbers and footer on all buffered pages
+        const range = doc.bufferedPageRange();
+        for (let i = range.start; i < range.start + range.count; i++) {
+            doc.switchToPage(i);
+            doc.page.margins.bottom = 0; // Prevent auto page breaks from footer text
+
+            // Footer separator line
+            doc.strokeColor("#E2E8F0").lineWidth(0.5);
+            doc.moveTo(marginLeft, pageHeight - 22).lineTo(marginLeft + contentWidth, pageHeight - 22).stroke();
+
+            // Footer left
+            doc.font("Helvetica").fontSize(7.5).fillColor("#94A3B8");
+            doc.text(
+                "ProcureIQ Enterprise Procurement Platform  |  NIMIT Engineering",
+                marginLeft,
+                pageHeight - 15,
+                { width: 320, align: "left", lineBreak: false }
+            );
+
+            // Footer center
+            doc.text(
+                "Confidential Document — For Internal Use Only",
+                marginLeft + 280,
+                pageHeight - 15,
+                { width: contentWidth - 560, align: "center", lineBreak: false }
+            );
+
+            // Footer right
+            doc.text(
+                `Page ${i + 1} of ${range.count}`,
+                marginLeft + contentWidth - 120,
+                pageHeight - 15,
+                { width: 120, align: "right", lineBreak: false }
+            );
+        }
+
+        doc.end();
+    } catch (error) {
+        console.error(error);
+        log(`Vendor PDF export failed - ${error.message}`);
+        return res.status(500).json({ success: false, message: "Failed to export vendor PDF file" });
     }
 });
 
@@ -3521,6 +4092,15 @@ app.post("/purchase-orders/:po_id/issue", verifyManager, async (req, res) => {
             `Expected delivery: ${dateText(po.expected_delivery_date)}. ${describePayment(po)}. ` +
             `Status changed from DRAFT to ISSUED and the PO PDF was generated.`
         );
+        if (req.headers.accept?.includes("application/json") || req.query.format === "json") {
+            return res.json({
+                success: true,
+                message: "PO generated and issued successfully",
+                po_id: poId,
+                po_number: po.po_number,
+                download_url: `/purchase-orders/${poId}/download`
+            });
+        }
         const safeFileName = po.po_number.replace(/\//g, "_") + ".pdf";
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${safeFileName}"`);
@@ -3637,90 +4217,6 @@ app.post("/purchase-orders/:po_id/complete", verifyProcurement, async (req, res)
         return res.status(500).json({ success: false, message: "Failed to complete Purchase Order" });
     } finally {
         connection.release();
-    }
-});
-
-// POST /purchase-orders/:po_id/proforma-invoice - Uploads (or replaces) the Proforma
-// Invoice for an issued/completed PO. Stored at backend/proforma-invoice/<PO number
-// with PO swapped for PI>.<ext>. Report log: PI_UPLOADED.
-app.post("/purchase-orders/:po_id/proforma-invoice", verifyProcurement, upload.single("proforma_invoice"), async (req, res) => {
-    const poId = Number(req.params.po_id);
-    if (!Number.isInteger(poId) || poId <= 0)return res.status(400).json({ success: false, message: "Invalid PO ID" });
-    if (!req.file)return res.status(400).json({ success: false, message: "Proforma Invoice file is required" });
-    try {
-        const [rows] = await db.execute(
-            `SELECT po_id, po_number, status FROM purchase_orders WHERE po_id = ? LIMIT 1`,
-            [poId]
-        );
-        if (!rows.length)return res.status(404).json({ success: false, message: "Purchase Order not found" });
-        const po = rows[0];
-        if (po.status === "DRAFT")return res.status(409).json({ success: false, message: "PO must be issued before uploading a Proforma Invoice" });
-        fs.mkdirSync(piFolder, { recursive: true });
-        // Replace any previously uploaded PI (possibly with a different extension).
-        const existing = findPiFilePath(po.po_number);
-        if (existing) fs.unlinkSync(existing);
-        const fileName = getPiFileName(po.po_number, req.file.originalname);
-        const filePath = path.join(piFolder, fileName);
-        fs.writeFileSync(filePath, req.file.buffer);
-        log(`Proforma Invoice uploaded - PO ID: ${poId}, File: ${fileName}`);
-        await writeReportLog(
-            req,
-            "PI_UPLOADED",
-            `Proforma Invoice uploaded for Purchase Order ${po.po_number} (File: ${fileName}).`
-        );
-        return res.json({
-            success: true,
-            message: "Proforma Invoice uploaded successfully",
-            file_name: fileName
-        });
-    } catch (error) {
-        console.error(error);
-        log(`Proforma Invoice upload failed - ${error.message}`);
-        return res.status(500).json({ success: false, message: "Failed to upload Proforma Invoice" });
-    }
-});
-
-// GET /purchase-orders/:po_id/proforma-invoice/status - Tells the frontend whether a
-// Proforma Invoice already exists for this PO, so it can show Upload vs Download.
-app.get("/purchase-orders/:po_id/proforma-invoice/status", verifyProcurement, async (req, res) => {
-    const poId = Number(req.params.po_id);
-    if (!Number.isInteger(poId) || poId <= 0)return res.status(400).json({ success: false, message: "Invalid PO ID" });
-    try {
-        const [rows] = await db.execute(
-            `SELECT po_number FROM purchase_orders WHERE po_id = ? LIMIT 1`,
-            [poId]
-        );
-        if (!rows.length)return res.status(404).json({ success: false, message: "Purchase Order not found" });
-        return res.json({ success: true, exists: !!findPiFilePath(rows[0].po_number) });
-    } catch (error) {
-        console.error(error);
-        log(`Proforma Invoice status check failed - ${error.message}`);
-        return res.status(500).json({ success: false, message: "Failed to check Proforma Invoice status" });
-    }
-});
-
-// GET /purchase-orders/:po_id/proforma-invoice - Downloads the uploaded Proforma
-// Invoice for a PO. Report log: PI_DOWNLOADED.
-app.get("/purchase-orders/:po_id/proforma-invoice", verifyProcurement, async (req, res) => {
-    const poId = Number(req.params.po_id);
-    if (!Number.isInteger(poId) || poId <= 0)return res.status(400).json({ success: false, message: "Invalid PO ID" });
-    try {
-        const [rows] = await db.execute(
-            `SELECT po_number FROM purchase_orders WHERE po_id = ? LIMIT 1`,
-            [poId]
-        );
-        if (!rows.length)return res.status(404).json({ success: false, message: "Purchase Order not found" });
-        const po_number = rows[0].po_number;
-        const filePath  = findPiFilePath(po_number);
-        if (!filePath)return res.status(404).json({ success: false, message: "Proforma Invoice not yet uploaded for this PO" });
-        await writeReportLog(req,"PI_DOWNLOADED",`Proforma Invoice downloaded for Purchase Order ${po_number}.`);
-        res.setHeader("Content-Disposition", `attachment; filename="${path.basename(filePath)}"`);
-        res.setHeader("Content-Length", fs.statSync(filePath).size);
-        fs.createReadStream(filePath).pipe(res);
-    } catch (error) {
-        console.error(error);
-        log(`Proforma Invoice download failed - ${error.message}`);
-        return res.status(500).json({ success: false, message: "Failed to download Proforma Invoice" });
     }
 });
 
@@ -4558,6 +5054,59 @@ const VENDOR_EDITABLE_FIELDS = [
     "branch_office_3_contact_number"
 ];
 
+const VENDOR_FIELD_LABELS = {
+    vendor_name: "Vendor Name",
+    commercial_role: "Commercial Role",
+    director_or_ceo_or_management_name: "Director/Management Name",
+    director_or_ceo_or_management_designation: "Director Designation",
+    director_or_ceo_or_management_mobile_no: "Director Mobile",
+    director_or_ceo_or_management_email: "Director Email",
+    director_or_ceo_or_management_web_address: "Director Web Address",
+    sales_team_name: "Sales Team Name",
+    sales_team_contact: "Sales Team Contact",
+    sales_team_email: "Sales Team Email",
+    accounts_team_name: "Accounts Team Name",
+    accounts_team_contact: "Accounts Team Contact",
+    accounts_team_email: "Accounts Team Email",
+    office_address: "Office Address",
+    office_contact_name: "Office Contact Name",
+    office_contact_number: "Office Contact Number",
+    factory_address: "Factory Address",
+    factory_contact_name: "Factory Contact Name",
+    factory_contact_number: "Factory Contact Number",
+    warehouse_address: "Warehouse Address",
+    warehouse_contact_name: "Warehouse Contact Name",
+    warehouse_contact_number: "Warehouse Contact Number",
+    workshop_address: "Workshop Address",
+    workshop_contact_name: "Workshop Contact Name",
+    workshop_contact_number: "Workshop Contact Number",
+    branch_office_1_address: "Branch 1 Address",
+    branch_office_1_contact_name: "Branch 1 Contact Name",
+    branch_office_1_contact_number: "Branch 1 Contact Number",
+    branch_office_2_address: "Branch 2 Address",
+    branch_office_2_contact_name: "Branch 2 Contact Name",
+    branch_office_2_contact_number: "Branch 2 Contact Number",
+    branch_office_3_address: "Branch 3 Address",
+    branch_office_3_contact_name: "Branch 3 Contact Name",
+    branch_office_3_contact_number: "Branch 3 Contact Number",
+    legal_entity: "Legal Entity",
+    bank_name: "Bank Name",
+    bank_account_no: "Bank Account No.",
+    bank_branch: "Bank Branch",
+    bank_account_type: "Bank Account Type",
+    bank_ifsc: "Bank IFSC Code"
+};
+
+function formatVendorChanges(changedFields, oldObj, newObj) {
+    if (!changedFields.length) return "none";
+    return changedFields.map(f => {
+        const label = VENDOR_FIELD_LABELS[f] || f;
+        const oldVal = (oldObj[f] !== null && oldObj[f] !== undefined && String(oldObj[f]).trim() !== "") ? `"${oldObj[f]}"` : 'empty';
+        const newVal = (newObj[f] !== null && newObj[f] !== undefined && String(newObj[f]).trim() !== "") ? `"${newObj[f]}"` : 'empty';
+        return `${label}: ${oldVal} → ${newVal}`;
+    }).join("; ");
+}
+
 app.put("/vendors/:vendor_id", verifyAdmin, async (req, res) => {
     const vendorId = Number(req.params.vendor_id);
     if (!Number.isInteger(vendorId) || vendorId <= 0) {
@@ -4607,17 +5156,19 @@ app.put("/vendors/:vendor_id", verifyAdmin, async (req, res) => {
             String(old[f] ?? "") !== String(cleanValue(req.body[f]) ?? "")
         );
 
+        const changeDetails = formatVendorChanges(changed, old, req.body);
+
         await writeReportLog(req, "VENDOR_UPDATED",
-            `Vendor "${old.vendor_name}" (${orDash(old.vendor_code)}, vendor ID ${vendorId}) details updated. ` +
-            `Fields changed: ${changed.length ? changed.join(", ") : "none"}.`
+            `Vendor "${cleanValue(req.body.vendor_name) || old.vendor_name}" (${orDash(old.vendor_code)}, vendor ID ${vendorId}) details updated. ` +
+            `Changes: ${changeDetails}.`
         );
 
         await writeAuditLog(req, "VENDOR_UPDATED",
-            JSON.stringify(Object.fromEntries(VENDOR_EDITABLE_FIELDS.filter(f => req.body[f] !== undefined).map(f => [f, old[f]]))),
-            JSON.stringify(Object.fromEntries(VENDOR_EDITABLE_FIELDS.filter(f => req.body[f] !== undefined).map(f => [f, cleanValue(req.body[f])])))
+            JSON.stringify(Object.fromEntries(changed.map(f => [f, old[f]]))),
+            JSON.stringify(Object.fromEntries(changed.map(f => [f, cleanValue(req.body[f])])))
         );
 
-        log(`Vendor updated - Vendor ID: ${vendorId}, Fields: ${changed.join(", ")}`);
+        log(`Vendor updated - Vendor ID: ${vendorId}, Changes: ${changeDetails}`);
 
         return res.json({ success: true, message: "Vendor details updated successfully" });
 
@@ -4709,17 +5260,19 @@ app.put("/vendors/:vendor_id/bank", verifyAdmin, async (req, res) => {
             String(old[f] ?? "") !== String(cleanValue(bankData[f]) ?? "")
         );
 
+        const changeDetails = formatVendorChanges(changed, old, bankData);
+
         await writeReportLog(req, "VENDOR_BANK_UPDATED",
             `Bank/legal details updated for vendor "${old.vendor_name}" (${orDash(old.vendor_code)}, vendor ID ${vendorId}). ` +
-            `Fields changed: ${changed.length ? changed.join(", ") : "none"}. Password verified before save.`
+            `Changes: ${changeDetails}. Password verified before save.`
         );
 
         await writeAuditLog(req, "VENDOR_BANK_UPDATED",
-            JSON.stringify(Object.fromEntries(VENDOR_BANK_FIELDS.filter(f => bankData[f] !== undefined).map(f => [f, old[f]]))),
-            JSON.stringify(Object.fromEntries(VENDOR_BANK_FIELDS.filter(f => bankData[f] !== undefined).map(f => [f, cleanValue(bankData[f])])))
+            JSON.stringify(Object.fromEntries(changed.map(f => [f, old[f]]))),
+            JSON.stringify(Object.fromEntries(changed.map(f => [f, cleanValue(bankData[f])])))
         );
 
-        log(`Vendor bank details updated - Vendor ID: ${vendorId}`);
+        log(`Vendor bank details updated - Vendor ID: ${vendorId}, Changes: ${changeDetails}`);
 
         return res.json({ success: true, message: "Bank details updated successfully" });
 
@@ -5264,8 +5817,8 @@ app.get("/login-logs", verifyAdmin, async (req, res) => {
     }
 });
 
-/* ==========================================================================
-   SERVER STARTUP
-   ========================================================================== */
+const { errorHandler } = require("./middleware/error.middleware");
+app.use(errorHandler);
 
 module.exports = app;
+

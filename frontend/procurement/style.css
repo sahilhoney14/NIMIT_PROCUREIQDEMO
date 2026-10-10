@@ -1348,6 +1348,264 @@ td input.taxable-input {
     margin-top: 2px;
 }
 
+/* ── Purchase Orders Filter Toolbar ── */
+.po-filter-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 18px;
+    background: transparent;
+}
+
+.po-filter-top-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* Search input */
+.po-search-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0 14px;
+    height: 42px;
+    flex: 1 1 260px;
+    min-width: 220px;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.po-search-box:focus-within {
+    border-color: #0B57A4;
+    box-shadow: 0 0 0 3px rgba(11, 87, 164, 0.12);
+}
+
+.po-input-icon {
+    color: #64748b;
+    flex-shrink: 0;
+}
+
+.po-search-input {
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 13.5px;
+    color: #0f172a;
+    width: 100%;
+    font-family: inherit;
+}
+
+.po-search-input::placeholder {
+    color: #94a3b8;
+}
+
+/* Dropdown cards (Status, Vendor) */
+.po-select-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 3px 12px;
+    height: 42px;
+    min-width: 130px;
+    position: relative;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    transition: all 0.2s ease;
+}
+
+.po-select-card:focus-within {
+    border-color: #0B57A4;
+    box-shadow: 0 0 0 3px rgba(11, 87, 164, 0.12);
+}
+
+.po-field-label {
+    font-size: 10.5px;
+    font-weight: 500;
+    color: #64748b;
+    line-height: 1.1;
+    margin-bottom: 1px;
+    pointer-events: none;
+}
+
+.po-select-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+}
+
+.po-field-select {
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #0f172a;
+    width: 100%;
+    cursor: pointer;
+    padding-right: 18px;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: inherit;
+}
+
+.po-chevron-icon {
+    position: absolute;
+    right: 0;
+    pointer-events: none;
+    color: #64748b;
+}
+
+/* Date Range Card */
+.po-date-range-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 3px 14px;
+    height: 42px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    transition: all 0.2s ease;
+}
+
+.po-date-range-card:focus-within {
+    border-color: #0B57A4;
+    box-shadow: 0 0 0 3px rgba(11, 87, 164, 0.12);
+}
+
+.po-calendar-icon {
+    color: #64748b;
+    flex-shrink: 0;
+}
+
+.po-date-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.po-date-sublabel {
+    font-size: 10.5px;
+    font-weight: 500;
+    color: #64748b;
+    line-height: 1.1;
+}
+
+.po-date-field {
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: #0f172a;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 0;
+    height: 18px;
+}
+
+.po-date-arrow {
+    color: #94a3b8;
+    font-size: 14px;
+    line-height: 1;
+}
+
+/* Clear & Apply Buttons */
+.po-btn-clear {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    color: #334155;
+    font-size: 13.5px;
+    font-weight: 500;
+    padding: 0 18px;
+    height: 42px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    font-family: inherit;
+}
+
+.po-btn-clear:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+.po-btn-apply {
+    background: #0B57A4;
+    border: 1px solid #0B57A4;
+    color: #ffffff;
+    font-size: 13.5px;
+    font-weight: 600;
+    padding: 0 22px;
+    height: 42px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 3px rgba(11, 87, 164, 0.25);
+    font-family: inherit;
+}
+
+.po-btn-apply:hover {
+    background: #08437f;
+    border-color: #08437f;
+}
+
+.po-btn-apply:active {
+    transform: translateY(1px);
+}
+
+/* Row 2: Status Pills */
+.po-filter-pills-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    margin-top: 2px;
+}
+
+.po-filter-pills {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.po-filter-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 7px 16px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+}
+
+.po-filter-pill:hover {
+    background: #e2e8f0;
+    color: #1e293b;
+}
+
+.po-filter-pill.active {
+    background: #0B57A4;
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(11, 87, 164, 0.2);
+}
+
 /* ── Order Tracking Filter Bar ── */
 .ot-filter-bar {
     display: flex;
@@ -1840,24 +2098,6 @@ td input.taxable-input {
     margin-left: auto;
 }
 
-/* PI actions container inline */
-.po-row-detail .pi-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.po-row-detail .pi-actions .secondary-button,
-.po-row-detail .pi-actions label.secondary-button {
-    margin-top: 0;
-    padding: 8px 16px;
-    font-size: 13px;
-    height: 38px;
-    display: inline-flex;
-    align-items: center;
-    cursor: pointer;
-}
-
 /* ─── Goods Received ──────────────────────────────────────── */
 
 .goods-received-list {
@@ -2069,6 +2309,42 @@ td input.taxable-input {
     border-top: 1px solid #e2e8f0;
 }
 
+.vp-detail-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    box-sizing: border-box;
+}
+
+.vp-kpi-grid,
+.vp-meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr 1.3fr;
+    column-gap: 24px;
+    row-gap: 12px;
+    align-items: start;
+}
+
+.vp-detail-container .vp-kpi-grid .inquiry-card-item,
+.vp-detail-container .vp-meta-grid .inquiry-card-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    flex: none;
+}
+
+.vp-detail-container .vp-meta-grid .vp-meta-item--office {
+    grid-column: span 2;
+}
+
+.vp-detail-container .vp-meta-grid .vp-meta-item--contact {
+    grid-column: 5;
+}
+
 .vp-detail-container .inquiry-card-info {
     display: flex;
     flex-wrap: wrap;
@@ -2094,6 +2370,7 @@ td input.taxable-input {
     color: #64748b;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    line-height: 1.2;
 }
 
 .vp-detail-container .inquiry-card-value {
@@ -2101,6 +2378,7 @@ td input.taxable-input {
     color: #0f172a;
     font-weight: 600;
     word-break: break-word;
+    line-height: 1.4;
 }
 
 .vp-detail-container .table-container {
@@ -2250,10 +2528,43 @@ td input.taxable-input {
         min-width: 110px;
     }
 
+    .vp-detail-container .vp-kpi-grid {
+        grid-template-columns: repeat(3, 1fr);
+        column-gap: 16px;
+    }
+
+    .vp-detail-container .vp-meta-grid {
+        grid-template-columns: 1fr 1fr;
+        column-gap: 16px;
+    }
+
+    .vp-detail-container .vp-meta-grid .vp-meta-item--office {
+        grid-column: span 2;
+    }
+
+    .vp-detail-container .vp-meta-grid .vp-meta-item--contact {
+        grid-column: span 2;
+    }
+
     .vp-actions {
         flex-direction: column;
         align-items: stretch;
         gap: 6px;
+    }
+}
+
+@media (max-width: 600px) {
+    .vp-detail-container .vp-kpi-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .vp-detail-container .vp-meta-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .vp-detail-container .vp-meta-grid .vp-meta-item--office,
+    .vp-detail-container .vp-meta-grid .vp-meta-item--contact {
+        grid-column: 1;
     }
 }
 

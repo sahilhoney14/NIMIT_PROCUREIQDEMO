@@ -323,6 +323,10 @@
                                     <input type="date" id="registration_date">
                                 </div>
                                 <div class="form-group">
+                                    <label>Vendor Code <span style="font-size:11px;color:#64748b;font-weight:normal;">(Auto-generated if empty)</span></label>
+                                    <input type="text" id="vendor_code" placeholder="e.g. NEE2627V001 (auto if empty)">
+                                </div>
+                                <div class="form-group">
                                     <label>Vendor Name <span class="required-star">*</span></label>
                                     <input type="text" id="vendor_name">
                                 </div>
@@ -647,11 +651,11 @@
                             <h3 class="form-section-title">Documents</h3>
                             <div class="vendor-documents">
                                 <div class="form-group">
-                                    <label>GST Document</label>
+                                    <label>GST Document <span class="required-star">*</span></label>
                                     <input type="file" id="excel_gst_document">
                                 </div>
                                 <div class="form-group">
-                                    <label>PAN Document</label>
+                                    <label>PAN Document <span class="required-star">*</span></label>
                                     <input type="file" id="excel_pan_document">
                                 </div>
                                 <div class="form-group">
@@ -659,7 +663,7 @@
                                     <input type="file" id="excel_msme_document">
                                 </div>
                                 <div class="form-group">
-                                    <label>Last Year ITR</label>
+                                    <label>Last Year ITR <span class="required-star">*</span></label>
                                     <input type="file" id="excel_itr_last_year_document">
                                 </div>
                                 <div class="form-group">
@@ -682,7 +686,57 @@
                 <div id="vendorMessage" class="message"></div>
             </div>
             <div id="vendorPerformancePage" class="page hidden">
-                <h1>Vendor Performance</h1>
+                <div class="page-header" style="margin-bottom: 20px;">
+                    <h1>Vendor Performance</h1>
+                </div>
+
+                <!-- Filters Bar -->
+                <div class="vp-filter-bar ev-filter-bar">
+                    <div class="vp-search-box ev-search-box">
+                        <svg class="ev-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="vpSearchInput" placeholder="Search by Vendor Name or Vendor Code...">
+                        <button type="button" id="vpSearchClearBtn" class="ev-search-clear hidden" title="Clear search">✕</button>
+                    </div>
+                    <div class="vp-filter-group ev-filter-group">
+                        <select id="vpDeliveryFilter" title="Filter by On-Time Delivery %">
+                            <option value="">All Delivery Rates</option>
+                            <option value="high">High (≥ 80% On-Time)</option>
+                            <option value="medium">Average (50% - 79%)</option>
+                            <option value="low">Low (&lt; 50%)</option>
+                            <option value="none">No Deliveries Yet</option>
+                        </select>
+                        <select id="vpOrdersFilter" title="Filter by Orders">
+                            <option value="">All Orders</option>
+                            <option value="open">With Open Orders</option>
+                            <option value="has_orders">With Order History</option>
+                            <option value="no_orders">No Orders</option>
+                        </select>
+                        <select id="vpStatusFilter" title="Filter by Status">
+                            <option value="">All Statuses</option>
+                            <option value="active">Active Only</option>
+                            <option value="blacklisted">Blacklisted Only</option>
+                        </select>
+                        <select id="vpSortFilter" title="Sort Vendors">
+                            <option value="code_asc">Sort: Vendor Code</option>
+                            <option value="name_asc">Sort: Vendor Name (A-Z)</option>
+                            <option value="orders_desc">Sort: Total Orders (High-Low)</option>
+                            <option value="value_desc">Sort: Order Value (High-Low)</option>
+                            <option value="ontime_desc">Sort: On-Time % (High-Low)</option>
+                            <option value="lead_asc">Sort: Lead Time (Fastest)</option>
+                        </select>
+                        <button type="button" id="vpResetFiltersBtn" class="ev-btn-reset" title="Reset all filters">
+                            ↺ Reset
+                        </button>
+                    </div>
+                </div>
+
+                <div class="vp-table-meta" style="margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">
+                    <span id="vpResultsCount" style="font-size: 13px; color: #64748b; font-weight: 500;">Showing 0 vendors</span>
+                </div>
+
                 <div id="vendorPerformanceMessage" class="message"></div>
                 <div id="vendorPerformanceList"></div>
             </div> 
@@ -707,73 +761,81 @@
                 <h1>Order Tracking</h1>
 
                 <section class="entry-section">
-                    <div class="ot-filter-bar">
-                        <div class="ot-filter-pills" id="otStatusPills">
-                            <button type="button" class="ot-pill active" data-status="ALL">All</button>
-                            <button type="button" class="ot-pill" data-status="OPEN">
-                                <span class="ot-pill-dot dot-open"></span>Open
-                            </button>
-                            <button type="button" class="ot-pill" data-status="VENDOR_SELECTED">
-                                <span class="ot-pill-dot dot-vendor-selected"></span>Vendor Selected
-                            </button>
-                            <button type="button" class="ot-pill" data-status="CLOSED">
-                                <span class="ot-pill-dot dot-closed"></span>Closed
-                            </button>
-                            <button type="button" class="ot-pill" data-status="CANCELLED">
-                                <span class="ot-pill-dot dot-cancelled"></span>Cancelled
-                            </button>
-                        </div>
-                        <div class="ot-filter-controls">
-                            <div class="ot-date-filter-wrap">
-                                <div class="ot-date-preset-wrap">
-                                    <svg class="ot-date-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                                        <line x1="16" y1="2" x2="16" y2="6"></line>
-                                        <line x1="8" y1="2" x2="8" y2="6"></line>
-                                        <line x1="3" y1="10" x2="21" y2="10"></line>
-                                    </svg>
-                                    <select id="orderTrackingDatePreset" class="ot-date-preset-select" title="Filter by date preset">
-                                        <option value="ALL">All Dates</option>
-                                        <option value="TODAY">Today</option>
-                                        <option value="YESTERDAY">Yesterday</option>
-                                        <option value="THIS_WEEK">This Week</option>
-                                        <option value="THIS_MONTH">This Month</option>
-                                        <option value="LAST_30_DAYS">Last 30 Days</option>
-                                        <option value="CUSTOM">Custom Range</option>
-                                    </select>
-                                    <svg class="ot-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <polyline points="6 9 12 15 18 9"></polyline>
-                                    </svg>
-                                </div>
-                                <div id="otCustomDateRange" class="ot-custom-date-wrap">
-                                    <div class="ot-date-input-group">
-                                        <label for="orderTrackingFromDate" class="ot-date-label">From</label>
-                                        <input type="date" id="orderTrackingFromDate" class="ot-date-input" title="From Date">
-                                    </div>
-                                    <span class="ot-date-separator">&ndash;</span>
-                                    <div class="ot-date-input-group">
-                                        <label for="orderTrackingToDate" class="ot-date-label">To</label>
-                                        <input type="date" id="orderTrackingToDate" class="ot-date-input" title="To Date">
-                                    </div>
-                                    <button type="button" id="orderTrackingDateClear" class="ot-date-clear-btn" title="Reset date filter" style="display:none;">&times;</button>
-                                </div>
-                            </div>
-                            <div class="ot-search-wrap">
-                                <svg class="ot-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <div class="po-filter-container ot-filter-container">
+                        <div class="po-filter-top-row">
+                            <!-- Search -->
+                            <div class="po-search-box">
+                                <svg class="po-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                 </svg>
-                                <input type="text" id="orderTrackingSearch" class="ot-search-input" placeholder="Search PR #, PO #, party, item..." autocomplete="off">
-                                <button type="button" id="orderTrackingSearchClear" class="ot-clear-btn" title="Clear search" style="display:none;">&times;</button>
+                                <input type="text" id="orderTrackingSearch" class="po-search-input" placeholder="Search by PR number, PO number, party, item..." autocomplete="off">
                             </div>
-                            <button type="button" id="orderTrackingExportBtn" class="ot-export-btn" title="Export Order Summary to Excel (.xlsx)">
-                                <svg class="ot-export-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                    <polyline points="7 10 12 15 17 10"></polyline>
-                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+
+                            <!-- Status Dropdown -->
+                            <div class="po-select-card">
+                                <label class="po-field-label" for="orderTrackingStatusSelect">Status</label>
+                                <div class="po-select-wrap">
+                                    <select id="orderTrackingStatusSelect" class="po-field-select">
+                                        <option value="ALL">All</option>
+                                        <option value="OPEN">Open</option>
+                                        <option value="VENDOR_SELECTED">Vendor Selected</option>
+                                        <option value="CLOSED">Closed</option>
+                                        <option value="CANCELLED">Cancelled</option>
+                                    </select>
+                                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <!-- Vendor / Party Dropdown -->
+                            <div class="po-select-card">
+                                <label class="po-field-label" for="orderTrackingPartySelect">Vendor / Party</label>
+                                <div class="po-select-wrap">
+                                    <select id="orderTrackingPartySelect" class="po-field-select">
+                                        <option value="ALL">All</option>
+                                    </select>
+                                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <!-- Date Range -->
+                            <div class="po-date-range-card">
+                                <svg class="po-calendar-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                                    <line x1="3" y1="10" x2="21" y2="10"></line>
                                 </svg>
-                                <span>Export Excel</span>
-                            </button>
+                                <div class="po-date-item">
+                                    <label class="po-date-sublabel" for="orderTrackingFromDate">From Date</label>
+                                    <input type="date" id="orderTrackingFromDate" class="po-date-field" title="From Date">
+                                </div>
+                                <span class="po-date-arrow">&rarr;</span>
+                                <div class="po-date-item">
+                                    <label class="po-date-sublabel" for="orderTrackingToDate">To Date</label>
+                                    <input type="date" id="orderTrackingToDate" class="po-date-field" title="To Date">
+                                </div>
+                            </div>
+
+                            <!-- Clear & Apply -->
+                            <button type="button" id="orderTrackingClearBtn" class="po-btn-clear">Clear</button>
+                            <button type="button" id="orderTrackingApplyBtn" class="po-btn-apply">Apply</button>
+                            <button type="button" id="orderTrackingExportBtn" class="ot-export-btn" style="display:none;"></button>
+                        </div>
+
+                        <!-- Status Pills Row -->
+                        <div class="po-filter-pills-row">
+                            <div class="po-filter-pills" id="otStatusPills">
+                                <button type="button" class="po-filter-pill active" data-status="ALL" data-label="All">All (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="OPEN" data-label="Open">Open (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="VENDOR_SELECTED" data-label="Vendor Selected">Vendor Selected (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="CLOSED" data-label="Closed">Closed (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="CANCELLED" data-label="Cancelled">Cancelled (0)</button>
+                            </div>
                         </div>
                     </div>
 
@@ -799,21 +861,80 @@
                 <h1>Purchase Orders</h1>
 
                 <section class="entry-section">
-                    <div class="ot-filter-bar">
-                        <div class="ot-filter-pills" id="poStatusPills">
-                            <button type="button" class="ot-pill active" data-status="ALL">All</button>
-                            <button type="button" class="ot-pill" data-status="DRAFT">
-                                <span class="ot-pill-dot dot-draft"></span>Draft
-                            </button>
-                            <button type="button" class="ot-pill" data-status="ISSUED">
-                                <span class="ot-pill-dot dot-issued"></span>Issued
-                            </button>
-                            <button type="button" class="ot-pill" data-status="COMPLETED">
-                                <span class="ot-pill-dot dot-completed"></span>Completed
-                            </button>
-                            <button type="button" class="ot-pill" data-status="CANCELLED">
-                                <span class="ot-pill-dot dot-cancelled"></span>Cancelled
-                            </button>
+                    <div class="po-filter-container">
+                        <div class="po-filter-top-row">
+                            <!-- Search -->
+                            <div class="po-search-box">
+                                <svg class="po-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                                <input type="text" id="poSearchInput" class="po-search-input" placeholder="Search by PO number, vendor, item..." autocomplete="off">
+                            </div>
+
+                            <!-- Status Dropdown -->
+                            <div class="po-select-card">
+                                <label class="po-field-label" for="poStatusSelect">Status</label>
+                                <div class="po-select-wrap">
+                                    <select id="poStatusSelect" class="po-field-select">
+                                        <option value="ALL">All</option>
+                                        <option value="DRAFT">Draft</option>
+                                        <option value="ISSUED">Issued</option>
+                                        <option value="COMPLETED">Completed</option>
+                                        <option value="CANCELLED">Cancelled</option>
+                                    </select>
+                                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <!-- Vendor Dropdown -->
+                            <div class="po-select-card">
+                                <label class="po-field-label" for="poVendorSelect">Vendor / Party</label>
+                                <div class="po-select-wrap">
+                                    <select id="poVendorSelect" class="po-field-select">
+                                        <option value="ALL">All</option>
+                                    </select>
+                                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <!-- Date Range -->
+                            <div class="po-date-range-card">
+                                <svg class="po-calendar-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                                </svg>
+                                <div class="po-date-item">
+                                    <label class="po-date-sublabel" for="poDateFrom">From Date</label>
+                                    <input type="date" id="poDateFrom" class="po-date-field" title="From Date">
+                                </div>
+                                <span class="po-date-arrow">&rarr;</span>
+                                <div class="po-date-item">
+                                    <label class="po-date-sublabel" for="poDateTo">To Date</label>
+                                    <input type="date" id="poDateTo" class="po-date-field" title="To Date">
+                                </div>
+                            </div>
+
+                            <!-- Clear & Apply -->
+                            <button type="button" id="poFilterClearBtn" class="po-btn-clear">Clear</button>
+                            <button type="button" id="poFilterApplyBtn" class="po-btn-apply">Apply</button>
+                        </div>
+
+                        <!-- Status Pills Row -->
+                        <div class="po-filter-pills-row">
+                            <div class="po-filter-pills" id="poStatusPills">
+                                <button type="button" class="po-filter-pill active" data-status="ALL" data-label="All">All (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="DRAFT" data-label="Draft">Draft (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="ISSUED" data-label="Issued">Issued (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="COMPLETED" data-label="Completed">Completed (0)</button>
+                                <button type="button" class="po-filter-pill" data-status="CANCELLED" data-label="Cancelled">Cancelled (0)</button>
+                            </div>
                         </div>
                     </div>
                     <div id="purchaseOrdersList" class="inquiry-list">

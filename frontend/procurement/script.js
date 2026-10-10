@@ -66,6 +66,7 @@ let importedRows = [];
 let orderTrackingPage = 1;
 let orderTrackingTotalPages = 1;
 let orderTrackingStatus = "ALL";
+let orderTrackingParty = "ALL";
 let orderTrackingSearchQuery = "";
 let orderTrackingFromDate = "";
 let orderTrackingToDate = "";
@@ -638,26 +639,73 @@ function setTurnoverYears() {
     const now       = new Date();
     const month     = now.getMonth() + 1;
     const year      = now.getFullYear();
-
-    // FIX: "last three years" should be the three completed financial years.
-    // In September 2026, the current FY 26-27 is not finished, so start with
-    // 25-26 (startYear = 2025 when month < 4, else year-1).
-    const currentFYStart = month >= 4 ? year : year - 1;
-    const startYear      = currentFYStart - 1; // most recent *completed* FY
+    const startYear = month >= 4 ? year : year - 1;
 
     [
-        { id: "turnover_value_1", text: `${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)} Turnover` },
-        { id: "turnover_value_2", text: `${String(startYear - 1).slice(-2)}-${String(startYear).slice(-2)} Turnover` },
-        { id: "turnover_value_3", text: `${String(startYear - 2).slice(-2)}-${String(startYear - 1).slice(-2)} Turnover` }
-    ].forEach(({ id, text }) => {
+        { id: "turnover_value_1", text: `${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)} Turnover`, required: true },
+        { id: "turnover_value_2", text: `${String(startYear - 1).slice(-2)}-${String(startYear).slice(-2)} Turnover`, required: false },
+        { id: "turnover_value_3", text: `${String(startYear - 2).slice(-2)}-${String(startYear - 1).slice(-2)} Turnover`, required: false }
+    ].forEach(({ id, text, required }) => {
         const input = document.getElementById(id);
         if (!input) return;
         const label = input.closest(".form-group")?.querySelector("label");
-        if (label) label.textContent = text;
+        if (label) {
+            label.innerHTML = required ? `${text} <span class="required-star">*</span>` : text;
+        }
+    });
+}
+
+// Restrict user typing in real time: prevent numbers in name fields, prevent non-digits in phone/bank fields
+function attachVendorInputRestrictions() {
+    const personNameIds = [
+        "office_name", "director_name", "sales_name", "accounts_name",
+        "factory_name", "warehouse_name", "workshop_name",
+        "branch1_name", "branch2_name", "branch3_name",
+        "recommended_by", "approved_by"
+    ];
+    personNameIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el._restrictAttached) {
+            el._restrictAttached = true;
+            el.addEventListener("input", e => {
+                e.target.value = e.target.value.replace(/[0-9]/g, "");
+            });
+        }
+    });
+
+    const phoneIds = [
+        "office_phone", "director_mobile", "sales_contact", "accounts_contact",
+        "factory_phone", "warehouse_phone", "workshop_phone",
+        "branch1_contact", "branch2_contact", "branch3_contact"
+    ];
+    phoneIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el._restrictAttached) {
+            el._restrictAttached = true;
+            el.addEventListener("input", e => {
+                e.target.value = e.target.value.replace(/[^0-9]/g, "").slice(0, 10);
+            });
+        }
+    });
+
+    [
+        { id: "year_of_incorporation", fn: v => v.replace(/[^0-9]/g, "").slice(0, 4) },
+        { id: "account_no", fn: v => v.replace(/[^0-9]/g, "").slice(0, 18) },
+        { id: "pan_number", fn: v => v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10) },
+        { id: "gst_number", fn: v => v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 15) },
+        { id: "ifsc_rtgs", fn: v => v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11) },
+        { id: "vendor_code", fn: v => v.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 30) }
+    ].forEach(({ id, fn }) => {
+        const el = document.getElementById(id);
+        if (el && !el._restrictAttached) {
+            el._restrictAttached = true;
+            el.addEventListener("input", e => { e.target.value = fn(e.target.value); });
+        }
     });
 }
 
 setTurnoverYears();
+attachVendorInputRestrictions();
 
 // ─── Vendor Masters: Prefill recommended_by / approved_by ─────────────────────
 // FIX: read currentUsername at the time the form initialises, not at script
@@ -777,6 +825,114 @@ function validateVendorForm() {
         }
     }
 
+    const vendorName = String(document.getElementById("vendor_name")?.value ?? "").trim();
+    if (/^\d+$/.test(vendorName)) {
+        showVendorMessage("Vendor name cannot be only numbers. Please enter a valid company name.");
+        return false;
+    }
+    if (!/[a-zA-Z]/.test(vendorName)) {
+        showVendorMessage("Vendor name must contain valid letters.");
+        return false;
+    }
+
+    const personNames = [
+        { id: "office_name", label: "Office contact name" },
+        { id: "director_name", label: "Director name" },
+        { id: "sales_name", label: "Sales team name" },
+        { id: "accounts_name", label: "Accounts team name" },
+        { id: "factory_name", label: "Factory contact name" },
+        { id: "warehouse_name", label: "Warehouse contact name" },
+        { id: "workshop_name", label: "Workshop contact name" },
+        { id: "branch1_name", label: "Branch 1 contact name" },
+        { id: "branch2_name", label: "Branch 2 contact name" },
+        { id: "branch3_name", label: "Branch 3 contact name" },
+        { id: "recommended_by", label: "Recommended by" },
+        { id: "approved_by", label: "Approved by" }
+    ];
+    for (const { id, label } of personNames) {
+        const val = String(document.getElementById(id)?.value ?? "").trim();
+        if (val && /\d/.test(val)) {
+            showVendorMessage(`${label} cannot contain numbers. Only letters are allowed.`);
+            return false;
+        }
+    }
+
+    const phones = [
+        { id: "office_phone", label: "Office contact number", req: true },
+        { id: "director_mobile", label: "Director mobile number", req: true },
+        { id: "sales_contact", label: "Sales team contact", req: true },
+        { id: "accounts_contact", label: "Accounts team contact", req: true },
+        { id: "factory_phone", label: "Factory contact number", req: false },
+        { id: "warehouse_phone", label: "Warehouse contact number", req: false },
+        { id: "workshop_phone", label: "Workshop contact number", req: false },
+        { id: "branch1_contact", label: "Branch 1 contact number", req: false },
+        { id: "branch2_contact", label: "Branch 2 contact number", req: false },
+        { id: "branch3_contact", label: "Branch 3 contact number", req: false }
+    ];
+    for (const { id, label, req } of phones) {
+        const val = String(document.getElementById(id)?.value ?? "").trim().replace(/\s+/g, "");
+        if (req && !val) {
+            showVendorMessage(`${label} is required`);
+            return false;
+        }
+        if (val && !/^\d{10}$/.test(val)) {
+            showVendorMessage(`${label} must be a valid 10-digit number.`);
+            return false;
+        }
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    for (const [id, label] of [["director_email", "Director email"], ["sales_email", "Sales team email"], ["accounts_email", "Accounts team email"]]) {
+        const val = String(document.getElementById(id)?.value ?? "").trim();
+        if (!emailRegex.test(val)) {
+            showVendorMessage(`${label} must be a valid email address.`);
+            return false;
+        }
+    }
+
+    const yearVal = String(document.getElementById("year_of_incorporation")?.value ?? "").trim();
+    const curYear = new Date().getFullYear();
+    if (!/^\d{4}$/.test(yearVal) || parseInt(yearVal, 10) < 1800 || parseInt(yearVal, 10) > curYear) {
+        showVendorMessage(`Year of incorporation must be a valid 4-digit year (between 1800 and ${curYear}).`);
+        return false;
+    }
+
+    const gstVal = String(document.getElementById("gst_number")?.value ?? "").trim();
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/i.test(gstVal)) {
+        showVendorMessage("GST number must be 15 alphanumeric characters (e.g. 22AAAAA0000A1Z5).");
+        return false;
+    }
+
+    const panVal = String(document.getElementById("pan_number")?.value ?? "").trim();
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(panVal)) {
+        showVendorMessage("PAN number must be 10 characters (e.g. AAAAA0000A).");
+        return false;
+    }
+
+    const bankNameVal = String(document.getElementById("bank_name")?.value ?? "").trim();
+    if (/^\d+$/.test(bankNameVal)) {
+        showVendorMessage("Bank name cannot be only numbers.");
+        return false;
+    }
+
+    const accVal = String(document.getElementById("account_no")?.value ?? "").trim();
+    if (!/^\d{9,18}$/.test(accVal)) {
+        showVendorMessage("Bank account number must be between 9 and 18 digits.");
+        return false;
+    }
+
+    const ifscVal = String(document.getElementById("ifsc_rtgs")?.value ?? "").trim();
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(ifscVal)) {
+        showVendorMessage("IFSC code must be 11 alphanumeric characters (e.g. SBIN0001234).");
+        return false;
+    }
+
+    const t1 = String(document.getElementById("turnover_value_1")?.value ?? "").trim().replace(/,/g, "");
+    if (isNaN(Number(t1)) || Number(t1) < 0) {
+        showVendorMessage("Latest year turnover must be a valid numeric amount.");
+        return false;
+    }
+
     for (const [id, label] of VENDOR_REQUIRED_DOCUMENTS) {
         const el = document.getElementById(id);
         if (!el || !el.files?.[0]) {
@@ -845,7 +1001,7 @@ vendorManualForm.addEventListener("submit", async event => {
     const turnoverLabel = (inputId) => {
         const input = document.getElementById(inputId);
         const label = input?.closest(".form-group")?.querySelector("label");
-        return label ? label.textContent.replace(" Turnover", "").trim() : "";
+        return label ? label.textContent.replace(/\*/g, "").replace("Turnover", "").trim() : "";
     };
 
     const field = id => document.getElementById(id)?.value ?? "";
@@ -853,6 +1009,7 @@ vendorManualForm.addEventListener("submit", async event => {
     const data = {
         // FIX: read currentUsername at save time so it's never blank.
         registration_date:                         field("registration_date") || todayISO(),
+        vendor_code:                               field("vendor_code").trim(),
         vendor_name:                               field("vendor_name"),
 
         office_address:                            field("office_address"),
@@ -1115,6 +1272,8 @@ async function renderVendorPreview(vendor) {
 
     const used = new Set();
 
+    const reqFieldSet = new Set(VENDOR_REQUIRED_FIELDS.map(x => Array.isArray(x) ? x[0] : x));
+
     const buildSection = (title, fields) => {
         const section = document.createElement("div");
         section.className = "form-section";
@@ -1133,11 +1292,12 @@ async function renderVendorPreview(vendor) {
             const isDate = f === "registration_date";
             const value  = vendor[f];
             const shown  = isDate ? (value || todayISO()) : (value || "");
+            const isReq  = reqFieldSet.has(f);
 
             const group = document.createElement("div");
             group.className = "form-group";
             group.innerHTML = `
-                <label>${escapeHtml(label)}</label>
+                <label>${escapeHtml(label)}${isReq ? ' <span class="required-star">*</span>' : ''}</label>
                 <input id="preview_${f}" type="${isDate ? "date" : "text"}" value="${escapeHtml(shown)}">
             `;
             grid.appendChild(group);
@@ -1148,6 +1308,24 @@ async function renderVendorPreview(vendor) {
     };
 
     VENDOR_SECTIONS.forEach(section => buildSection(section.title, section.fields));
+
+    // Attach restrictions to preview inputs (prevent numbers in names, non-digits in phones)
+    const pNames = [
+        "office_contact_name", "director_or_ceo_or_management_name",
+        "sales_team_name", "accounts_team_name", "recommended_by", "approved_by"
+    ];
+    pNames.forEach(f => {
+        const el = document.getElementById(`preview_${f}`);
+        if (el) el.addEventListener("input", e => { e.target.value = e.target.value.replace(/[0-9]/g, ""); });
+    });
+    const pPhones = [
+        "office_contact_number", "director_or_ceo_or_management_mobile_no",
+        "sales_team_contact", "accounts_team_contact"
+    ];
+    pPhones.forEach(f => {
+        const el = document.getElementById(`preview_${f}`);
+        if (el) el.addEventListener("input", e => { e.target.value = e.target.value.replace(/[^0-9]/g, "").slice(0, 10); });
+    });
 
     const extraFields = Object.keys(vendor)
         .filter(f => !used.has(f))
@@ -1957,154 +2135,183 @@ function renderQuotationComparisons(inquiries) {
 
 // ─── Order Tracking: Load a Page ───────────────────────────────────────────────
 
+function ensureOtFilterToolbarInDom() {
+    if (document.getElementById("orderTrackingStatusSelect")) return;
+    const oldFilterBar = document.querySelector("#orderTrackingPage .ot-filter-bar");
+    if (!oldFilterBar && !orderTrackingList) return;
+
+    const container = document.createElement("div");
+    container.className = "po-filter-container ot-filter-container";
+    container.innerHTML = `
+        <div class="po-filter-top-row">
+            <!-- Search -->
+            <div class="po-search-box">
+                <svg class="po-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="orderTrackingSearch" class="po-search-input" placeholder="Search by PR number, PO number, party, item..." autocomplete="off">
+            </div>
+
+            <!-- Status Dropdown -->
+            <div class="po-select-card">
+                <label class="po-field-label" for="orderTrackingStatusSelect">Status</label>
+                <div class="po-select-wrap">
+                    <select id="orderTrackingStatusSelect" class="po-field-select">
+                        <option value="ALL">All</option>
+                        <option value="OPEN">Open</option>
+                        <option value="VENDOR_SELECTED">Vendor Selected</option>
+                        <option value="CLOSED">Closed</option>
+                        <option value="CANCELLED">Cancelled</option>
+                    </select>
+                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Vendor / Party Dropdown -->
+            <div class="po-select-card">
+                <label class="po-field-label" for="orderTrackingPartySelect">Vendor / Party</label>
+                <div class="po-select-wrap">
+                    <select id="orderTrackingPartySelect" class="po-field-select">
+                        <option value="ALL">All</option>
+                    </select>
+                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Date Range -->
+            <div class="po-date-range-card">
+                <svg class="po-calendar-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                <div class="po-date-item">
+                    <label class="po-date-sublabel" for="orderTrackingFromDate">From Date</label>
+                    <input type="date" id="orderTrackingFromDate" class="po-date-field" title="From Date">
+                </div>
+                <span class="po-date-arrow">&rarr;</span>
+                <div class="po-date-item">
+                    <label class="po-date-sublabel" for="orderTrackingToDate">To Date</label>
+                    <input type="date" id="orderTrackingToDate" class="po-date-field" title="To Date">
+                </div>
+            </div>
+
+            <!-- Clear & Apply -->
+            <button type="button" id="orderTrackingClearBtn" class="po-btn-clear">Clear</button>
+            <button type="button" id="orderTrackingApplyBtn" class="po-btn-apply">Apply</button>
+            <button type="button" id="orderTrackingExportBtn" class="ot-export-btn" style="display:none;"></button>
+        </div>
+
+        <!-- Status Pills Row -->
+        <div class="po-filter-pills-row">
+            <div class="po-filter-pills" id="otStatusPills">
+                <button type="button" class="po-filter-pill active" data-status="ALL" data-label="All">All (0)</button>
+                <button type="button" class="po-filter-pill" data-status="OPEN" data-label="Open">Open (0)</button>
+                <button type="button" class="po-filter-pill" data-status="VENDOR_SELECTED" data-label="Vendor Selected">Vendor Selected (0)</button>
+                <button type="button" class="po-filter-pill" data-status="CLOSED" data-label="Closed">Closed (0)</button>
+                <button type="button" class="po-filter-pill" data-status="CANCELLED" data-label="Cancelled">Cancelled (0)</button>
+            </div>
+        </div>
+    `;
+
+    if (oldFilterBar) {
+        oldFilterBar.replaceWith(container);
+    } else if (orderTrackingList && orderTrackingList.parentNode) {
+        orderTrackingList.parentNode.insertBefore(container, orderTrackingList);
+    }
+}
+
+function updateOrderTrackingPillsUI(currentStatus) {
+    const pillsWrap = document.getElementById("otStatusPills");
+    if (!pillsWrap) return;
+    pillsWrap.querySelectorAll(".po-filter-pill, .ot-pill").forEach(p => {
+        if ((p.dataset.status || "ALL").toUpperCase() === (currentStatus || "ALL").toUpperCase()) {
+            p.classList.add("active");
+        } else {
+            p.classList.remove("active");
+        }
+    });
+}
+
+function updateOrderTrackingPillCounts(counts) {
+    if (!counts) return;
+    const pillsWrap = document.getElementById("otStatusPills");
+    if (!pillsWrap) return;
+    pillsWrap.querySelectorAll(".po-filter-pill, .ot-pill").forEach(p => {
+        const status = (p.dataset.status || "ALL").toUpperCase();
+        const label = p.dataset.label || p.textContent.replace(/\s*\(\d+\)/, "").trim() || "All";
+        const count = counts[status] !== undefined ? counts[status] : 0;
+        p.textContent = `${label} (${count})`;
+    });
+}
+
+function populateOrderTrackingPartyDropdown(partyList) {
+    const partySelect = document.getElementById("orderTrackingPartySelect");
+    if (!partySelect || !Array.isArray(partyList) || !partyList.length) return;
+    const currentVal = partySelect.value || orderTrackingParty || "ALL";
+    const parties = Array.from(new Set(partyList.map(p => String(p).trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    if (!parties.length) return;
+    partySelect.innerHTML = `<option value="ALL">All</option>` +
+        parties.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+    if (parties.includes(currentVal)) {
+        partySelect.value = currentVal;
+    } else {
+        partySelect.value = "ALL";
+    }
+}
+
 function initOrderTrackingFilters() {
+    ensureOtFilterToolbarInDom();
     if (orderTrackingFiltersInitialized) return;
+
     const searchInput   = document.getElementById("orderTrackingSearch");
-    const clearBtn      = document.getElementById("orderTrackingSearchClear");
-    const pillsWrap     = document.getElementById("otStatusPills");
-    const datePreset    = document.getElementById("orderTrackingDatePreset");
+    const statusSelect  = document.getElementById("orderTrackingStatusSelect");
+    const partySelect   = document.getElementById("orderTrackingPartySelect");
     const fromDateInput = document.getElementById("orderTrackingFromDate");
     const toDateInput   = document.getElementById("orderTrackingToDate");
-    const dateClearBtn  = document.getElementById("orderTrackingDateClear");
+    const clearBtn      = document.getElementById("orderTrackingClearBtn");
+    const applyBtn      = document.getElementById("orderTrackingApplyBtn");
+    const pillsWrap     = document.getElementById("otStatusPills");
 
-    if (!pillsWrap && !searchInput && !datePreset) return;
+    if (!pillsWrap && !searchInput && !statusSelect) return;
     orderTrackingFiltersInitialized = true;
 
-    function formatLocalDate(d) {
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, "0");
-        const day = String(d.getDate()).padStart(2, "0");
-        return `${year}-${month}-${day}`;
-    }
-
-    function updateDateFilterUI() {
-        const hasDate = Boolean(orderTrackingFromDate || orderTrackingToDate || (orderTrackingDatePreset && orderTrackingDatePreset !== "ALL"));
-        if (dateClearBtn) {
-            dateClearBtn.style.display = hasDate ? "inline-flex" : "none";
-        }
-    }
-
-    function applyDatePreset(preset) {
-        orderTrackingDatePreset = preset;
-        const now = new Date();
-
-        if (preset === "ALL") {
-            orderTrackingFromDate = "";
-            orderTrackingToDate = "";
-            if (fromDateInput) fromDateInput.value = "";
-            if (toDateInput) toDateInput.value = "";
-        } else if (preset === "TODAY") {
-            const todayStr = formatLocalDate(now);
-            orderTrackingFromDate = todayStr;
-            orderTrackingToDate = todayStr;
-            if (fromDateInput) fromDateInput.value = todayStr;
-            if (toDateInput) toDateInput.value = todayStr;
-        } else if (preset === "YESTERDAY") {
-            const y = new Date(now);
-            y.setDate(y.getDate() - 1);
-            const yStr = formatLocalDate(y);
-            orderTrackingFromDate = yStr;
-            orderTrackingToDate = yStr;
-            if (fromDateInput) fromDateInput.value = yStr;
-            if (toDateInput) toDateInput.value = yStr;
-        } else if (preset === "THIS_WEEK") {
-            const day = now.getDay();
-            const diffToMonday = (day === 0 ? -6 : 1) - day;
-            const monday = new Date(now);
-            monday.setDate(now.getDate() + diffToMonday);
-            orderTrackingFromDate = formatLocalDate(monday);
-            orderTrackingToDate = formatLocalDate(now);
-            if (fromDateInput) fromDateInput.value = orderTrackingFromDate;
-            if (toDateInput) toDateInput.value = orderTrackingToDate;
-        } else if (preset === "THIS_MONTH") {
-            const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-            orderTrackingFromDate = formatLocalDate(firstDay);
-            orderTrackingToDate = formatLocalDate(now);
-            if (fromDateInput) fromDateInput.value = orderTrackingFromDate;
-            if (toDateInput) toDateInput.value = orderTrackingToDate;
-        } else if (preset === "LAST_30_DAYS") {
-            const past30 = new Date(now);
-            past30.setDate(now.getDate() - 29);
-            orderTrackingFromDate = formatLocalDate(past30);
-            orderTrackingToDate = formatLocalDate(now);
-            if (fromDateInput) fromDateInput.value = orderTrackingFromDate;
-            if (toDateInput) toDateInput.value = orderTrackingToDate;
-        } else if (preset === "CUSTOM") {
-            orderTrackingFromDate = fromDateInput ? fromDateInput.value : "";
-            orderTrackingToDate = toDateInput ? toDateInput.value : "";
-        }
-
-        updateDateFilterUI();
+    // Status select change
+    statusSelect?.addEventListener("change", (e) => {
+        orderTrackingStatus = e.target.value || "ALL";
         orderTrackingPage = 1;
-        loadOrderTracking();
-    }
-
-    // Date preset select
-    datePreset?.addEventListener("change", (e) => {
-        applyDatePreset(e.target.value);
-    });
-
-    // Custom date pickers
-    fromDateInput?.addEventListener("change", (e) => {
-        orderTrackingFromDate = e.target.value;
-        orderTrackingDatePreset = "CUSTOM";
-        if (datePreset) datePreset.value = "CUSTOM";
-        updateDateFilterUI();
-        orderTrackingPage = 1;
+        updateOrderTrackingPillsUI(orderTrackingStatus);
         loadOrderTracking();
     });
 
-    toDateInput?.addEventListener("change", (e) => {
-        orderTrackingToDate = e.target.value;
-        orderTrackingDatePreset = "CUSTOM";
-        if (datePreset) datePreset.value = "CUSTOM";
-        updateDateFilterUI();
+    // Party select change
+    partySelect?.addEventListener("change", (e) => {
+        orderTrackingParty = e.target.value || "ALL";
         orderTrackingPage = 1;
         loadOrderTracking();
     });
-
-    // Date clear button
-    dateClearBtn?.addEventListener("click", () => {
-        orderTrackingDatePreset = "ALL";
-        orderTrackingFromDate = "";
-        orderTrackingToDate = "";
-        if (datePreset) datePreset.value = "ALL";
-        if (fromDateInput) fromDateInput.value = "";
-        if (toDateInput) toDateInput.value = "";
-        updateDateFilterUI();
-        orderTrackingPage = 1;
-        loadOrderTracking();
-    });
-
-    function updatePillsUI(currentStatus) {
-        if (!pillsWrap) return;
-        const pills = pillsWrap.querySelectorAll(".ot-pill");
-        pills.forEach(p => {
-            if (p.dataset.status === currentStatus) {
-                p.classList.add("active");
-            } else {
-                p.classList.remove("active");
-            }
-        });
-    }
 
     // Pill buttons click
     pillsWrap?.addEventListener("click", (e) => {
-        const pill = e.target.closest(".ot-pill");
+        const pill = e.target.closest(".po-filter-pill, .ot-pill");
         if (!pill) return;
-        const status = pill.dataset.status;
+        const status = (pill.dataset.status || "ALL").toUpperCase();
         orderTrackingStatus = status;
+        if (statusSelect) statusSelect.value = status;
+        updateOrderTrackingPillsUI(status);
         orderTrackingPage = 1;
-        updatePillsUI(status);
         loadOrderTracking();
     });
 
-    // Search input with debounce
+    // Search input with debounce and Enter
     searchInput?.addEventListener("input", (e) => {
         const val = e.target.value;
-        if (clearBtn) {
-            clearBtn.style.display = val ? "inline-flex" : "none";
-        }
         clearTimeout(orderTrackingDebounceTimer);
         orderTrackingDebounceTimer = setTimeout(() => {
             orderTrackingSearchQuery = val;
@@ -2113,32 +2320,68 @@ function initOrderTrackingFilters() {
         }, 300);
     });
 
-    // Search clear button
-    clearBtn?.addEventListener("click", () => {
-        if (searchInput) searchInput.value = "";
-        clearBtn.style.display = "none";
-        orderTrackingSearchQuery = "";
+    searchInput?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            clearTimeout(orderTrackingDebounceTimer);
+            orderTrackingSearchQuery = searchInput.value;
+            orderTrackingPage = 1;
+            loadOrderTracking();
+        }
+    });
+
+    // Custom date pickers
+    fromDateInput?.addEventListener("change", (e) => {
+        orderTrackingFromDate = e.target.value;
+    });
+
+    toDateInput?.addEventListener("change", (e) => {
+        orderTrackingToDate = e.target.value;
+    });
+
+    // Apply button
+    applyBtn?.addEventListener("click", () => {
+        if (searchInput) orderTrackingSearchQuery = searchInput.value;
+        if (statusSelect) orderTrackingStatus = statusSelect.value || "ALL";
+        if (partySelect) orderTrackingParty = partySelect.value || "ALL";
+        if (fromDateInput) orderTrackingFromDate = fromDateInput.value;
+        if (toDateInput) orderTrackingToDate = toDateInput.value;
         orderTrackingPage = 1;
+        updateOrderTrackingPillsUI(orderTrackingStatus);
         loadOrderTracking();
     });
 
-    // Export Summary button (Excel .xlsx)
+    // Clear button
+    clearBtn?.addEventListener("click", () => {
+        orderTrackingStatus = "ALL";
+        orderTrackingParty = "ALL";
+        orderTrackingSearchQuery = "";
+        orderTrackingFromDate = "";
+        orderTrackingToDate = "";
+        orderTrackingPage = 1;
+
+        if (searchInput) searchInput.value = "";
+        if (statusSelect) statusSelect.value = "ALL";
+        if (partySelect) partySelect.value = "ALL";
+        if (fromDateInput) fromDateInput.value = "";
+        if (toDateInput) toDateInput.value = "";
+
+        updateOrderTrackingPillsUI("ALL");
+        loadOrderTracking();
+    });
+
+    // Export button (if present)
     const exportBtn = document.getElementById("orderTrackingExportBtn");
     exportBtn?.addEventListener("click", async () => {
         const originalText = exportBtn.innerHTML;
         exportBtn.disabled = true;
-        exportBtn.innerHTML = `
-            <svg class="ot-export-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <path d="M12 6v6l4 2"></path>
-            </svg>
-            <span>Exporting Excel...</span>
-        `;
 
         try {
             const params = new URLSearchParams();
             if (orderTrackingStatus && orderTrackingStatus !== "ALL") {
                 params.set("status", orderTrackingStatus);
+            }
+            if (orderTrackingParty && orderTrackingParty !== "ALL") {
+                params.set("party", orderTrackingParty);
             }
             if (orderTrackingSearchQuery && orderTrackingSearchQuery.trim()) {
                 params.set("search", orderTrackingSearchQuery.trim());
@@ -2164,7 +2407,6 @@ function initOrderTrackingFilters() {
             a.style.display = "none";
             a.href = downloadUrl;
 
-            // Extract filename from header or fallback to .xlsx
             let downloadFilename = "";
             const disposition = response.headers.get("Content-Disposition");
             if (disposition && disposition.includes("filename=")) {
@@ -2207,6 +2449,9 @@ async function loadOrderTracking() {
         if (orderTrackingStatus && orderTrackingStatus !== "ALL") {
             params.set("status", orderTrackingStatus);
         }
+        if (orderTrackingParty && orderTrackingParty !== "ALL") {
+            params.set("party", orderTrackingParty);
+        }
         if (orderTrackingSearchQuery && orderTrackingSearchQuery.trim()) {
             params.set("search", orderTrackingSearchQuery.trim());
         }
@@ -2219,12 +2464,45 @@ async function loadOrderTracking() {
 
         const response = await apiFetch(`/order-tracking?${params.toString()}`);
         if (!response) return;
-
-        const result = await response.json();
+        const result   = await response.json();
 
         if (!response.ok || !result.success) {
             orderTrackingList.innerHTML = `<div class="message">${escapeHtml(result.message || "Failed to load order tracking data")}</div>`;
             return;
+        }
+
+        if (result.counts) {
+            updateOrderTrackingPillCounts(result.counts);
+        } else if (result.rows) {
+            const fallbackCounts = {
+                ALL: (result.pagination && result.pagination.total) ? result.pagination.total : result.rows.length,
+                OPEN: 0,
+                VENDOR_SELECTED: 0,
+                CLOSED: 0,
+                CANCELLED: 0
+            };
+            result.rows.forEach(r => {
+                const s = (r.status || "").toUpperCase();
+                if (fallbackCounts[s] !== undefined) fallbackCounts[s]++;
+            });
+            updateOrderTrackingPillCounts(fallbackCounts);
+        }
+
+        if (result.parties && result.parties.length) {
+            populateOrderTrackingPartyDropdown(result.parties);
+        } else if (result.rows && result.rows.length) {
+            const pSet = new Set();
+            result.rows.forEach(r => {
+                if (r.party_name && r.party_name.trim()) pSet.add(r.party_name.trim());
+                if (r.vendor_name && r.vendor_name.trim()) pSet.add(r.vendor_name.trim());
+            });
+            if (typeof allPurchaseOrders !== "undefined" && Array.isArray(allPurchaseOrders)) {
+                allPurchaseOrders.forEach(po => {
+                    if (po.vendor_name && po.vendor_name.trim()) pSet.add(po.vendor_name.trim());
+                    if (po.party_name && po.party_name.trim()) pSet.add(po.party_name.trim());
+                });
+            }
+            populateOrderTrackingPartyDropdown(Array.from(pSet));
         }
 
         renderOrderTracking(result.rows || []);
@@ -2238,7 +2516,6 @@ async function loadOrderTracking() {
         }
         if (orderTrackingPrev) orderTrackingPrev.disabled = !has_prev;
         if (orderTrackingNext) orderTrackingNext.disabled = !has_next;
-
 
     } catch {
         orderTrackingList.innerHTML = `<div class="message">Failed to connect to procurement manager service</div>`;
@@ -2312,7 +2589,7 @@ function renderOrderTrackingStepper(row) {
         alertBannerHtml = `
             <div class="tracker-alert-banner cancelled">
                 <svg viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
                 </svg>
                 <span>Purchase Order ${escapeHtml(row.po_number || "")} was cancelled${cancelDate && cancelDate !== "-" ? ` on ${cancelDate}` : ""}.</span>
             </div>
@@ -2645,41 +2922,293 @@ orderTrackingList.addEventListener("click", event => {
     expandBtn.textContent = isOpen ? "Expand ▾" : "Collapse ▴";
 });
 
-// ─── Purchase Orders: Load List ────────────────────────────────────────────────
+// ─── Purchase Orders: Load List & Filters ─────────────────────────────────────
 
 let allPurchaseOrders = [];
 let poStatusFilter = "ALL";
+let poVendorFilter = "ALL";
+let poSearchQuery = "";
+let poDateFromFilter = "";
+let poDateToFilter = "";
 let poFiltersInitialized = false;
 
+function ensurePoFilterToolbarInDom() {
+    if (document.getElementById("poSearchInput")) return;
+    const oldFilterBar = document.querySelector("#purchaseOrdersPage .ot-filter-bar");
+    if (!oldFilterBar && !purchaseOrdersList) return;
+
+    const container = document.createElement("div");
+    container.className = "po-filter-container";
+    container.innerHTML = `
+        <div class="po-filter-top-row">
+            <div class="po-search-box">
+                <svg class="po-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="poSearchInput" class="po-search-input" placeholder="Search by PO number, vendor, item..." autocomplete="off">
+            </div>
+            <div class="po-select-card">
+                <label class="po-field-label" for="poStatusSelect">Status</label>
+                <div class="po-select-wrap">
+                    <select id="poStatusSelect" class="po-field-select">
+                        <option value="ALL">All</option>
+                        <option value="DRAFT">Draft</option>
+                        <option value="ISSUED">Issued</option>
+                        <option value="COMPLETED">Completed</option>
+                        <option value="CANCELLED">Cancelled</option>
+                    </select>
+                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+            </div>
+            <div class="po-select-card">
+                <label class="po-field-label" for="poVendorSelect">Vendor / Party</label>
+                <div class="po-select-wrap">
+                    <select id="poVendorSelect" class="po-field-select">
+                        <option value="ALL">All</option>
+                    </select>
+                    <svg class="po-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+            </div>
+            <div class="po-date-range-card">
+                <svg class="po-calendar-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                <div class="po-date-item">
+                    <label class="po-date-sublabel" for="poDateFrom">From Date</label>
+                    <input type="date" id="poDateFrom" class="po-date-field" title="From Date">
+                </div>
+                <span class="po-date-arrow">&rarr;</span>
+                <div class="po-date-item">
+                    <label class="po-date-sublabel" for="poDateTo">To Date</label>
+                    <input type="date" id="poDateTo" class="po-date-field" title="To Date">
+                </div>
+            </div>
+            <button type="button" id="poFilterClearBtn" class="po-btn-clear">Clear</button>
+            <button type="button" id="poFilterApplyBtn" class="po-btn-apply">Apply</button>
+        </div>
+        <div class="po-filter-pills-row">
+            <div class="po-filter-pills" id="poStatusPills">
+                <button type="button" class="po-filter-pill active" data-status="ALL" data-label="All">All (0)</button>
+                <button type="button" class="po-filter-pill" data-status="DRAFT" data-label="Draft">Draft (0)</button>
+                <button type="button" class="po-filter-pill" data-status="ISSUED" data-label="Issued">Issued (0)</button>
+                <button type="button" class="po-filter-pill" data-status="COMPLETED" data-label="Completed">Completed (0)</button>
+                <button type="button" class="po-filter-pill" data-status="CANCELLED" data-label="Cancelled">Cancelled (0)</button>
+            </div>
+        </div>
+    `;
+
+    if (oldFilterBar) {
+        oldFilterBar.replaceWith(container);
+    } else if (purchaseOrdersList) {
+        purchaseOrdersList.parentElement.insertBefore(container, purchaseOrdersList);
+    }
+}
+
 function initPurchaseOrderFilters() {
+    ensurePoFilterToolbarInDom();
     if (poFiltersInitialized) return;
+
     const pillsWrap = document.getElementById("poStatusPills");
-    if (!pillsWrap) return;
+    const searchInput = document.getElementById("poSearchInput");
+    const statusSelect = document.getElementById("poStatusSelect");
+    const vendorSelect = document.getElementById("poVendorSelect");
+    const dateFromInput = document.getElementById("poDateFrom");
+    const dateToInput = document.getElementById("poDateTo");
+    const clearBtn = document.getElementById("poFilterClearBtn");
+    const applyBtn = document.getElementById("poFilterApplyBtn");
+
+    if (!pillsWrap && !searchInput) return;
     poFiltersInitialized = true;
 
-    pillsWrap.addEventListener("click", (e) => {
-        const pill = e.target.closest(".ot-pill");
+    // Status Pills Click
+    pillsWrap?.addEventListener("click", (e) => {
+        const pill = e.target.closest(".po-filter-pill, .ot-pill");
         if (!pill) return;
-        const status = pill.dataset.status || "ALL";
+        const status = (pill.dataset.status || "ALL").toUpperCase();
         poStatusFilter = status;
+        if (statusSelect) statusSelect.value = status;
+        updateActivePoPill(status);
+        applyPurchaseOrderFilter();
+    });
 
-        pillsWrap.querySelectorAll(".ot-pill").forEach(p => {
-            if (p.dataset.status === status) {
-                p.classList.add("active");
-            } else {
-                p.classList.remove("active");
-            }
-        });
+    // Status Select Change
+    statusSelect?.addEventListener("change", () => {
+        poStatusFilter = (statusSelect.value || "ALL").toUpperCase();
+        updateActivePoPill(poStatusFilter);
+        applyPurchaseOrderFilter();
+    });
 
+    // Vendor Select Change
+    vendorSelect?.addEventListener("change", () => {
+        poVendorFilter = vendorSelect.value || "ALL";
+        applyPurchaseOrderFilter();
+    });
+
+    // Search Input (live search with trim)
+    searchInput?.addEventListener("input", () => {
+        poSearchQuery = searchInput.value || "";
+        applyPurchaseOrderFilter();
+    });
+
+    // Date From & To Change
+    dateFromInput?.addEventListener("change", () => {
+        poDateFromFilter = dateFromInput.value || "";
+    });
+    dateToInput?.addEventListener("change", () => {
+        poDateToFilter = dateToInput.value || "";
+    });
+
+    // Apply Button
+    applyBtn?.addEventListener("click", () => {
+        if (searchInput) poSearchQuery = searchInput.value || "";
+        if (statusSelect) poStatusFilter = (statusSelect.value || "ALL").toUpperCase();
+        if (vendorSelect) poVendorFilter = vendorSelect.value || "ALL";
+        if (dateFromInput) poDateFromFilter = dateFromInput.value || "";
+        if (dateToInput) poDateToFilter = dateToInput.value || "";
+        updateActivePoPill(poStatusFilter);
+        applyPurchaseOrderFilter();
+    });
+
+    // Clear Button
+    clearBtn?.addEventListener("click", () => {
+        if (searchInput) searchInput.value = "";
+        if (statusSelect) statusSelect.value = "ALL";
+        if (vendorSelect) vendorSelect.value = "ALL";
+        if (dateFromInput) dateFromInput.value = "";
+        if (dateToInput) dateToInput.value = "";
+
+        poSearchQuery = "";
+        poStatusFilter = "ALL";
+        poVendorFilter = "ALL";
+        poDateFromFilter = "";
+        poDateToFilter = "";
+
+        updateActivePoPill("ALL");
         applyPurchaseOrderFilter();
     });
 }
 
+function updateActivePoPill(status) {
+    const pillsWrap = document.getElementById("poStatusPills");
+    if (!pillsWrap) return;
+    pillsWrap.querySelectorAll(".po-filter-pill, .ot-pill").forEach(p => {
+        if ((p.dataset.status || "ALL").toUpperCase() === status.toUpperCase()) {
+            p.classList.add("active");
+        } else {
+            p.classList.remove("active");
+        }
+    });
+}
+
+function updatePoStatusPillCounts() {
+    const counts = {
+        ALL: allPurchaseOrders.length,
+        DRAFT: 0,
+        ISSUED: 0,
+        COMPLETED: 0,
+        CANCELLED: 0
+    };
+    allPurchaseOrders.forEach(po => {
+        const s = (po.status || "").toUpperCase();
+        if (counts[s] !== undefined) counts[s]++;
+    });
+
+    const pillsWrap = document.getElementById("poStatusPills");
+    if (!pillsWrap) return;
+    pillsWrap.querySelectorAll(".po-filter-pill, .ot-pill").forEach(pill => {
+        const status = (pill.dataset.status || "ALL").toUpperCase();
+        const label = pill.dataset.label || "All";
+        const count = counts[status] ?? 0;
+        pill.textContent = `${label} (${count})`;
+    });
+}
+
+function populatePoVendorDropdown() {
+    const vendorSelect = document.getElementById("poVendorSelect");
+    if (!vendorSelect) return;
+    const currentVal = vendorSelect.value || "ALL";
+    const names = new Set();
+    allPurchaseOrders.forEach(po => {
+        const vName = (po.vendor_name || "").trim();
+        const pName = (po.party_name || "").trim();
+        if (vName) names.add(vName);
+        if (pName) names.add(pName);
+    });
+    const sortedNames = Array.from(names).sort((a, b) => a.localeCompare(b));
+    vendorSelect.innerHTML = `<option value="ALL">All</option>` +
+        sortedNames.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+    if (sortedNames.includes(currentVal)) {
+        vendorSelect.value = currentVal;
+    } else {
+        vendorSelect.value = "ALL";
+        poVendorFilter = "ALL";
+    }
+}
+
 function applyPurchaseOrderFilter() {
     let filtered = allPurchaseOrders;
+
+    // 1. Status Filter
     if (poStatusFilter && poStatusFilter !== "ALL") {
-        filtered = allPurchaseOrders.filter(po => (po.status || "").toUpperCase() === poStatusFilter.toUpperCase());
+        filtered = filtered.filter(po => (po.status || "").toUpperCase() === poStatusFilter.toUpperCase());
     }
+
+    // 2. Vendor / Party Filter
+    if (poVendorFilter && poVendorFilter !== "ALL") {
+        const target = poVendorFilter.trim().toLowerCase();
+        filtered = filtered.filter(po =>
+            (po.vendor_name || "").trim().toLowerCase() === target ||
+            (po.party_name || "").trim().toLowerCase() === target
+        );
+    }
+
+    // 3. Date Range Filter
+    if (poDateFromFilter || poDateToFilter) {
+        filtered = filtered.filter(po => {
+            const rawDate = po.po_date || po.pr_date;
+            if (!rawDate) return false;
+            const d = new Date(rawDate);
+            if (isNaN(d.getTime())) return false;
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, "0");
+            const dd = String(d.getDate()).padStart(2, "0");
+            const poYMD = `${yyyy}-${mm}-${dd}`;
+
+            if (poDateFromFilter && poYMD < poDateFromFilter) return false;
+            if (poDateToFilter && poYMD > poDateToFilter) return false;
+            return true;
+        });
+    }
+
+    // 4. Search Query Filter
+    if (poSearchQuery && poSearchQuery.trim()) {
+        const terms = poSearchQuery.trim().toLowerCase().split(/\s+/);
+        filtered = filtered.filter(po => {
+            const searchable = [
+                po.po_number,
+                po.vendor_name,
+                po.vendor_code,
+                po.party_name,
+                po.item_name,
+                po.pr_number,
+                po.make,
+                po.model,
+                po.location,
+                po.territory
+            ].filter(Boolean).join(" ").toLowerCase();
+
+            return terms.every(t => searchable.includes(t));
+        });
+    }
+
     renderPurchaseOrders(filtered);
 }
 
@@ -2699,6 +3228,8 @@ async function loadPurchaseOrders() {
         }
 
         allPurchaseOrders = result.purchase_orders || [];
+        updatePoStatusPillCounts();
+        populatePoVendorDropdown();
         applyPurchaseOrderFilter();
 
     } catch {
@@ -2743,6 +3274,7 @@ function renderPurchaseOrders(orders) {
                 <div class="po-row-field">
                     <span class="inquiry-card-label">Party Name</span>
                     <span class="inquiry-card-value">${escapeHtml(po.party_name || "-")}</span>
+                    ${po.vendor_name ? `<span style="font-size:11px;color:#64748b;display:block;margin-top:2px;">Vendor: ${escapeHtml(po.vendor_name)}</span>` : ""}
                 </div>
                 <div class="po-row-field">
                     <span class="inquiry-card-label">Item Name</span>
@@ -2833,8 +3365,6 @@ function renderPurchaseOrders(orders) {
                             ⬇ Download PO
                         </button>
                     ` : ""}
-
-                    <div class="pi-actions" id="piActions-${po.po_id}"></div>
                 </div>
 
                 <div class="vendor-details-panel" id="vendorDetailsPanel-${po.po_id}">
@@ -2879,38 +3409,7 @@ function renderPurchaseOrders(orders) {
         `;
 
         purchaseOrdersList.appendChild(card);
-
-        if (po.status !== "DRAFT") loadProformaInvoiceStatus(po.po_id);
     });
-}
-
-// ─── Purchase Orders: Proforma Invoice (Upload / Download) ────────────────────
-
-async function loadProformaInvoiceStatus(poId) {
-    const container = document.getElementById(`piActions-${poId}`);
-    if (!container) return;
-
-    try {
-        const response = await apiFetch(`/purchase-orders/${poId}/proforma-invoice/status`);
-        if (!response) return;
-
-        const result = await response.json();
-        if (!response.ok || !result.success) return;
-
-        renderProformaInvoiceButton(container, poId, result.exists);
-
-    } catch {
-        // Silently ignore — the button just won't render if the check fails.
-    }
-}
-
-function renderProformaInvoiceButton(container, poId, exists) {
-    container.innerHTML = exists
-        ? `<button type="button" class="secondary-button download-pi-btn" data-po-id="${poId}">⬇ Download PI</button>`
-        : `<label class="secondary-button upload-pi-label">
-               Upload PI
-               <input type="file" class="upload-pi-input" data-po-id="${poId}" hidden>
-           </label>`;
 }
 
 // ─── Purchase Orders: Expand Row + Toggle Vendor Details ──────────────────────
@@ -2951,28 +3450,29 @@ purchaseOrdersList.addEventListener("click", async event => {
             if (!response) return;
 
             if (!response.ok) {
-                const result = await response.json();
+                const result = await response.json().catch(() => ({}));
                 alert(result.message || "Failed to issue PO.");
+                issuePOBtn.disabled    = false;
+                issuePOBtn.textContent = "Issue PO";
                 return;
             }
-            const blob = await response.blob();
-            const url  = URL.createObjectURL(blob);
-            const a    = document.createElement("a");
-            a.href     = url;
 
-            const disposition = response.headers.get("Content-Disposition");
-            const match = disposition?.match(/filename="?([^"]+)"?/i);
-            a.download = match ? match[1] : `PO_${poId}.pdf`;
-            a.click();
-            URL.revokeObjectURL(url);
-
-            alert("PO issued successfully.");
+            alert("PO generated and issued successfully. You can download the PO using the Download button.");
             await loadPurchaseOrders();
+
+            const detail = document.getElementById(`poDetail-${poId}`);
+            if (detail) {
+                detail.style.display = "block";
+                const expandBtn = detail.parentElement?.querySelector(".expand-po-btn");
+                if (expandBtn) expandBtn.textContent = "Collapse ▴";
+            }
         } catch (error) {
             console.error(error);
             alert("Failed to connect to procurement service.");
+            issuePOBtn.disabled    = false;
+            issuePOBtn.textContent = "Issue PO";
         } finally {
-            // Button is stale after loadPurchaseOrders re-renders; no need to re-enable.
+            // Cleanup if needed
         }
 
         return;
@@ -2980,48 +3480,14 @@ purchaseOrdersList.addEventListener("click", async event => {
 
     const downloadPoBtn = event.target.closest(".download-po-btn");
     if (downloadPoBtn) {
-        window.open(`/purchase-orders/${downloadPoBtn.dataset.poId}/download`, "_blank");
+        const poId = downloadPoBtn.dataset.poId;
+        const link = document.createElement("a");
+        link.href = `/purchase-orders/${poId}/download`;
+        link.setAttribute("download", "");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
         return;
-    }
-
-    const downloadPiBtn = event.target.closest(".download-pi-btn");
-    if (downloadPiBtn) {
-        window.open(`/purchase-orders/${downloadPiBtn.dataset.poId}/proforma-invoice`, "_blank");
-        return;
-    }
-});
-
-purchaseOrdersList.addEventListener("change", async event => {
-    const uploadInput = event.target.closest(".upload-pi-input");
-    if (!uploadInput) return;
-
-    const file = uploadInput.files[0];
-    if (!file) return;
-
-    const poId      = uploadInput.dataset.poId;
-    const formData  = new FormData();
-    formData.append("proforma_invoice", file);
-
-    try {
-        const response = await apiFetch(`/purchase-orders/${poId}/proforma-invoice`, {
-            method: "POST",
-            body: formData
-        });
-
-        if (!response) return;
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            alert(result.message || "Failed to upload Proforma Invoice");
-            return;
-        }
-
-        alert("Proforma Invoice uploaded successfully.");
-        await loadProformaInvoiceStatus(poId);
-
-    } catch {
-        alert("Failed to connect to procurement service.");
     }
 });
 
@@ -3457,11 +3923,16 @@ vendorPerformanceList.addEventListener("click", async event => {
     }
 });
 
+let allVendorPerformance = [];
+let vpFiltersInitialized = false;
+
 async function loadVendorPerformance() {
     const msg = document.getElementById("vendorPerformanceMessage");
 
     vendorPerformanceList.innerHTML = "";
     msg.textContent = "Loading vendor performance...";
+
+    initVendorPerformanceFilters();
 
     try {
         const response = await apiFetch("/vendor-performance");
@@ -3475,27 +3946,146 @@ async function loadVendorPerformance() {
         }
 
         msg.textContent = "";
-        renderVendorPerformance(result.vendors || []);
+        allVendorPerformance = result.vendors || [];
+        filterAndRenderVendorPerformance();
 
     } catch {
         msg.textContent = "Failed to connect to procurement service";
     }
 }
 
+function filterAndRenderVendorPerformance() {
+    const query    = document.getElementById("vpSearchInput")?.value.trim().toLowerCase() || "";
+    const delivery = document.getElementById("vpDeliveryFilter")?.value || "";
+    const orders   = document.getElementById("vpOrdersFilter")?.value || "";
+    const status   = document.getElementById("vpStatusFilter")?.value || "";
+    const sort     = document.getElementById("vpSortFilter")?.value || "code_asc";
+
+    const clearBtn = document.getElementById("vpSearchClearBtn");
+    if (clearBtn) {
+        clearBtn.classList.toggle("hidden", !query);
+    }
+
+    let filtered = allVendorPerformance.filter(v => {
+        if (query) {
+            const code = (v.vendor_code || "").toLowerCase();
+            const name = (v.vendor_name || "").toLowerCase();
+            if (!code.includes(query) && !name.includes(query)) {
+                return false;
+            }
+        }
+
+        if (delivery === "high") {
+            if (v.on_time_pct === null || v.on_time_pct < 80) return false;
+        } else if (delivery === "medium") {
+            if (v.on_time_pct === null || v.on_time_pct < 50 || v.on_time_pct >= 80) return false;
+        } else if (delivery === "low") {
+            if (v.on_time_pct === null || v.on_time_pct >= 50) return false;
+        } else if (delivery === "none") {
+            if (v.total_deliveries > 0) return false;
+        }
+
+        if (orders === "open") {
+            if ((v.open_orders || 0) <= 0) return false;
+        } else if (orders === "has_orders") {
+            if ((v.total_orders || 0) <= 0) return false;
+        } else if (orders === "no_orders") {
+            if ((v.total_orders || 0) > 0) return false;
+        }
+
+        if (status === "active") {
+            if (v.is_blacklisted) return false;
+        } else if (status === "blacklisted") {
+            if (!v.is_blacklisted) return false;
+        }
+
+        return true;
+    });
+
+    filtered.sort((a, b) => {
+        if (sort === "name_asc") {
+            return (a.vendor_name || "").localeCompare(b.vendor_name || "");
+        } else if (sort === "orders_desc") {
+            return (b.total_orders || 0) - (a.total_orders || 0);
+        } else if (sort === "value_desc") {
+            return (b.order_value || 0) - (a.order_value || 0);
+        } else if (sort === "ontime_desc") {
+            const pctA = a.on_time_pct !== null ? a.on_time_pct : -1;
+            const pctB = b.on_time_pct !== null ? b.on_time_pct : -1;
+            return pctB - pctA;
+        } else if (sort === "lead_asc") {
+            const leadA = a.avg_lead_time_days !== null ? a.avg_lead_time_days : 999999;
+            const leadB = b.avg_lead_time_days !== null ? b.avg_lead_time_days : 999999;
+            return leadA - leadB;
+        } else {
+            if (!a.vendor_code && !b.vendor_code) return 0;
+            if (!a.vendor_code) return 1;
+            if (!b.vendor_code) return -1;
+            return a.vendor_code.localeCompare(b.vendor_code, undefined, { numeric: true });
+        }
+    });
+
+    const countEl = document.getElementById("vpResultsCount");
+    if (countEl) {
+        if (filtered.length === allVendorPerformance.length) {
+            countEl.textContent = `Showing all ${filtered.length} vendor${filtered.length === 1 ? "" : "s"}`;
+        } else {
+            countEl.textContent = `Showing ${filtered.length} of ${allVendorPerformance.length} vendor${allVendorPerformance.length === 1 ? "" : "s"}`;
+        }
+    }
+
+    renderVendorPerformance(filtered);
+}
+
+function initVendorPerformanceFilters() {
+    if (vpFiltersInitialized) return;
+    const searchInput = document.getElementById("vpSearchInput");
+    const clearBtn    = document.getElementById("vpSearchClearBtn");
+    const deliverySel = document.getElementById("vpDeliveryFilter");
+    const ordersSel   = document.getElementById("vpOrdersFilter");
+    const statusSel   = document.getElementById("vpStatusFilter");
+    const sortSel     = document.getElementById("vpSortFilter");
+    const resetBtn    = document.getElementById("vpResetFiltersBtn");
+
+    if (!searchInput) return;
+
+    vpFiltersInitialized = true;
+
+    searchInput.addEventListener("input", filterAndRenderVendorPerformance);
+
+    clearBtn?.addEventListener("click", () => {
+        searchInput.value = "";
+        searchInput.focus();
+        filterAndRenderVendorPerformance();
+    });
+
+    deliverySel?.addEventListener("change", filterAndRenderVendorPerformance);
+    ordersSel?.addEventListener("change", filterAndRenderVendorPerformance);
+    statusSel?.addEventListener("change", filterAndRenderVendorPerformance);
+    sortSel?.addEventListener("change", filterAndRenderVendorPerformance);
+
+    resetBtn?.addEventListener("click", () => {
+        searchInput.value = "";
+        if (deliverySel) deliverySel.value = "";
+        if (ordersSel) ordersSel.value = "";
+        if (statusSel) statusSel.value = "";
+        if (sortSel) sortSel.value = "code_asc";
+        filterAndRenderVendorPerformance();
+    });
+}
+
 function renderVendorPerformance(vendors) {
     if (!vendors.length) {
-        vendorPerformanceList.innerHTML = `<div class="message">No vendors found.</div>`;
+        vendorPerformanceList.innerHTML = `
+            <div class="ev-no-results" style="padding: 40px 20px; text-align: center; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;">
+                <div style="font-size: 32px; margin-bottom: 8px;">🔍</div>
+                <div style="font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 4px;">No matching vendors found</div>
+                <div style="font-size: 13px; color: #64748b;">Try adjusting your search terms or filter criteria.</div>
+            </div>
+        `;
         return;
     }
 
-    vendors.sort((a, b) => {
-        if (!a.vendor_code && !b.vendor_code) return 0;
-        if (!a.vendor_code) return 1;
-        if (!b.vendor_code) return -1;
-        return a.vendor_code.localeCompare(b.vendor_code, undefined, { numeric: true });
-    });
-
-    // FIX: no addEventListener call here — the listener lives at module level above.
     const table = document.createElement("div");
     table.className = "table-container";
     table.innerHTML = `
@@ -3561,27 +4151,31 @@ function renderVendorPerformance(vendors) {
 }
 
 function renderVendorPerformanceDetail(container, { profile, kpis, orders }) {
-    const kpiCard = (label, value) => `
-        <div class="inquiry-card-item">
-            <span class="inquiry-card-label">${escapeHtml(label)}</span>
-            <span class="inquiry-card-value">${escapeHtml(String(value ?? "-"))}</span>
+    const kpiCard = (label, value, extraClass = "") => `
+        <div class="inquiry-card-item${extraClass ? " " + extraClass : ""}">
+            <span class="inquiry-card-label">${label}</span>
+            <span class="inquiry-card-value">${value}</span>
         </div>
     `;
 
+    const onTimeHtml = kpis.on_time_pct !== null
+        ? `<span class="${kpis.on_time_pct >= 80 ? "status-open" : kpis.on_time_pct >= 50 ? "status-vendor_selected" : "status-cancelled"}">${kpis.on_time_pct}%</span> <span style="font-size:12px;color:#888;margin-left:6px;">(${kpis.on_time_deliveries}/${kpis.total_deliveries})</span>`
+        : "-";
+
     container.innerHTML = `
-        <div class="inquiry-card-info" style="margin-bottom:16px;">
-            ${kpiCard("Total Orders",     kpis.total_orders)}
-            ${kpiCard("Order Value",      `₹${formatCurrency(kpis.order_value)}`)}
-            ${kpiCard("Avg Lead Time",    kpis.avg_lead_time_days !== null ? `${kpis.avg_lead_time_days} days` : "-")}
-            ${kpiCard("On-Time Delivery", kpis.on_time_pct !== null ? `${kpis.on_time_pct}% (${kpis.on_time_deliveries}/${kpis.total_deliveries})` : "-")}
-            ${kpiCard("Open Orders",      kpis.open_orders)}
+        <div class="vp-detail-card vp-kpi-grid">
+            ${kpiCard("Total Orders",      kpis.total_orders)}
+            ${kpiCard("Order Value",       `₹${formatCurrency(kpis.order_value)}`)}
+            ${kpiCard("Avg Lead Time",     kpis.avg_lead_time_days !== null ? `${kpis.avg_lead_time_days} days` : "-")}
+            ${kpiCard("On-Time Delivery",  onTimeHtml)}
+            ${kpiCard("Open Orders",       kpis.open_orders)}
         </div>
 
-        <div class="inquiry-card-info" style="margin-bottom:16px;">
-            ${kpiCard("GST",           profile.gst_number  || "-")}
-            ${kpiCard("PAN",           profile.pan_number  || "-")}
-            ${kpiCard("Office",        profile.office_address || "-")}
-            ${kpiCard("Sales Contact", profile.sales_team_email || "-")}
+        <div class="vp-detail-card vp-meta-grid">
+            ${kpiCard("GST",           escapeHtml(profile.gst_number  || "-"))}
+            ${kpiCard("PAN",           escapeHtml(profile.pan_number  || "-"))}
+            ${kpiCard("Office",        escapeHtml(profile.office_address || "-"), "vp-meta-item--office")}
+            ${kpiCard("Sales Contact", escapeHtml(profile.sales_team_email || "-"), "vp-meta-item--contact")}
         </div>
 
         <div class="table-container">
@@ -3592,7 +4186,7 @@ function renderVendorPerformanceDetail(container, { profile, kpis, orders }) {
                         <th>PO Date</th>
                         <th>Item</th>
                         <th>Qty</th>
-                        <th>Total Price</th>
+                        <th>Total Price (₹)</th>
                         <th>Expected Delivery</th>
                         <th>First Receipt</th>
                         <th>Lead Time</th>
