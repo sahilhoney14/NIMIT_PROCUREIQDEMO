@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { sanitizeFolderName, getFileExtension } = require("../utils/sanitizers");
+const { getFinancialYear } = require("./sequence.service");
 const { log } = require("../utils/logger");
 
 const vendorFolder = path.resolve(__dirname, "../../vendor");
@@ -88,10 +89,17 @@ function parseVendorData(req) {
     }
 }
 
+function generateVendorCode(vendorId, customVendorCode = null) {
+    if (customVendorCode) return String(customVendorCode).trim();
+    const financialYear = getFinancialYear().replace("-", "");
+    return `NEE${financialYear}V${String(vendorId || 0).padStart(3, "0")}`;
+}
+
 module.exports = {
     vendorFolder,
     VENDOR_FIELDS,
     saveVendorDocuments,
     cleanupFiles,
-    parseVendorData
+    parseVendorData,
+    generateVendorCode
 };

@@ -1,4 +1,5 @@
 const http = require("http");
+const PORT = process.env.PORT || 5000;
 
 function req(options, data) {
     return new Promise((resolve, reject) => {
@@ -34,7 +35,7 @@ async function run() {
     // 1. Login as admin
     const login = await req({
         hostname: "localhost",
-        port: 3000,
+        port: PORT,
         path: "/login",
         method: "POST",
         headers: { "Content-Type": "application/json" }
@@ -100,7 +101,7 @@ async function run() {
 
     const res = await req({
         hostname: "localhost",
-        port: 3000,
+        port: PORT,
         path: "/vendors",
         method: "POST",
         headers: {

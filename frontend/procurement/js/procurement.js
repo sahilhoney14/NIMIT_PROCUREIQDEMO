@@ -1,3 +1,45 @@
+function toDateInputValue(val) {
+    if (!val) return '';
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val.trim())) {
+        return val.trim();
+    }
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
+function getDerivedPaymentTerms(po) {
+    if (!po) return '';
+    if (po.payment_terms_remarks && String(po.payment_terms_remarks).trim()) {
+        return String(po.payment_terms_remarks).trim();
+    }
+    const type = String(po.payment_type || po.viv_payment_type || '').toUpperCase();
+    const advVal = (po.advance_value !== null && po.advance_value !== undefined && po.advance_value !== '')
+        ? Number(po.advance_value)
+        : (po.viv_advance_value !== null && po.viv_advance_value !== undefined && po.viv_advance_value !== '' ? Number(po.viv_advance_value) : null);
+    const dueDays = (po.balance_due_days !== null && po.balance_due_days !== undefined && po.balance_due_days !== '')
+        ? Number(po.balance_due_days)
+        : (po.viv_balance_due_days !== null && po.viv_balance_due_days !== undefined && po.viv_balance_due_days !== '' ? Number(po.viv_balance_due_days) : null);
+
+    if (type === 'ADVANCE' || (advVal !== null && advVal >= 100)) {
+        return advVal ? `Payment will be ${advVal}% advance.` : 'Payment will be 100% advance.';
+    }
+    if (type === 'ADVANCE_PLUS_BALANCE' || (advVal !== null && dueDays !== null)) {
+        const adv = advVal !== null ? `${advVal}% advance` : 'advance';
+        const bal = dueDays !== null ? `balance payment after ${dueDays} days` : 'balance on delivery';
+        return `Payment will be ${adv}, ${bal}.`;
+    }
+    if (dueDays !== null && dueDays > 0) {
+        return `Payment will be ${dueDays} days credit.`;
+    }
+    if (po.viv_payment_terms_remarks && String(po.viv_payment_terms_remarks).trim()) {
+        return String(po.viv_payment_terms_remarks).trim();
+    }
+    if (po.quotation_remarks && String(po.quotation_remarks).trim()) {
+        return String(po.quotation_remarks).trim();
+    }
+    return '';
+}
 // ─── DOM References ────────────────────────────────────────────────────────────
 
 // Purchase Requests
@@ -3996,7 +4038,7 @@ function renderPurchaseOrders(orders) {
             <div class="po-row-summary">
                 <div class="po-row-field">
                     <span class="inquiry-card-label">PO Number</span>
-                    <span class="inquiry-card-value">${escapeHtml(po.po_number || "-")}</span>
+                    <span class="inquiry-card-value">${escapeHtml(po.po_number || "-")}${po.revision_number > 0 ? `<span class="badge-rev" style="background:#e0f2fe;color:#0369a1;font-weight:700;font-size:11px;padding:2px 6px;border-radius:4px;margin-left:5px;border:1px solid #bae6fd;vertical-align:middle;">Rev ${po.revision_number}</span>` : ""}</span>
                     ${po.po_date ? `<span class="ot-row-date">${formatDate(po.po_date)}</span>` : ""}
                 </div>
                 <div class="po-row-field">
@@ -4021,7 +4063,8 @@ function renderPurchaseOrders(orders) {
             </div>
 
             <div class="po-row-detail" id="poDetail-${po.po_id}" style="display:none">
-                <div class="inquiry-card-info">
+                <div class="po-view-container" id="poViewContainer-${po.po_id}">
+<div class="inquiry-card-info">
                     ${po.po_date ? `
                     <div class="inquiry-card-item">
                         <span class="inquiry-card-label">PO Date</span>
@@ -4041,6 +4084,10 @@ function renderPurchaseOrders(orders) {
                         ${po.vendor_name && po.party_name ? `<span style="font-size:11px;color:#64748b;display:block;margin-top:2px;">Party: ${escapeHtml(po.party_name)}</span>` : ""}
                     </div>
                     <div class="inquiry-card-item">
+                        <span class="inquiry-card-label">Attendant (ATTN) Name</span>
+                        <span class="inquiry-card-value">${escapeHtml(po.attn_name || "-")}</span>
+                    </div>
+                    <div class="inquiry-card-item">
                         <span class="inquiry-card-label">Location</span>
                         <span class="inquiry-card-value">${escapeHtml(po.location || "-")}</span>
                     </div>
@@ -4057,8 +4104,12 @@ function renderPurchaseOrders(orders) {
                         <span class="inquiry-card-value">${escapeHtml(po.item_name || "-")}</span>
                     </div>
                     <div class="inquiry-card-item">
-                        <span class="inquiry-card-label">Make / Model</span>
-                        <span class="inquiry-card-value">${escapeHtml(po.make || "-")} / ${escapeHtml(po.model || "-")}</span>
+                        <span class="inquiry-card-label">Make</span>
+                        <span class="inquiry-card-value">${escapeHtml(po.make || "-")}</span>
+                    </div>
+                    <div class="inquiry-card-item">
+                        <span class="inquiry-card-label">Model</span>
+                        <span class="inquiry-card-value">${escapeHtml(po.model || "-")}</span>
                     </div>
                     <div class="inquiry-card-item">
                         <span class="inquiry-card-label">Quantity</span>
@@ -4076,33 +4127,159 @@ function renderPurchaseOrders(orders) {
                         <span class="inquiry-card-label">Product Remarks</span>
                         <span class="inquiry-card-value">${escapeHtml(po.product_remarks || "-")}</span>
                     </div>
+                    <div class="inquiry-card-item">
+                        <span class="inquiry-card-label">Expected Delivery</span>
+                        <span class="inquiry-card-value">${po.expected_delivery_date ? formatDate(po.expected_delivery_date) : (po.viv_expected_delivery_date ? formatDate(po.viv_expected_delivery_date) : "-")}</span>
+                    </div>
+                    <div class="inquiry-card-item">
+                        <span class="inquiry-card-label">Delivery Destination</span>
+                        <span class="inquiry-card-value">${po.delivery_type === "DIRECT_SITE" ? `Direct to Site (${escapeHtml(po.delivery_address || "-")})` : "At Our Office"}</span>
+                    </div>
+                    <div class="inquiry-card-item">
+                        <span class="inquiry-card-label">Payment Terms</span>
+                        <span class="inquiry-card-value">${escapeHtml(po.payment_terms_remarks || getDerivedPaymentTerms(po) || "-")}</span>
+                    </div>
                 </div>
 
                 <div class="inquiry-card-footer">
                     <button type="button" class="primary-button vendor-details-toggle" data-po-id="${po.po_id}">
                         Show Vendor Details
                     </button>
-
                     ${po.status === "DRAFT" ? `
                         <button type="button" class="primary-button issue-po-btn"
                             data-po-id="${po.po_id}">
                             Issue PO
                         </button>
-                        <button type="button" class="secondary-button reselect-po-btn"
-                            data-po-id="${po.po_id}"
-                            data-po-number="${escapeHtml(po.po_number || "")}">
-                            ↩ Change Vendor
-                        </button>
                     ` : ""}
-
                     ${(po.status === "ISSUED" || po.status === "COMPLETED") ? `
                         <button type="button" class="secondary-button download-po-btn" data-po-id="${po.po_id}">
                             ⬇ Download PO
                         </button>
                     ` : ""}
+                    ${(po.status === "DRAFT" || po.status === "ISSUED") ? `
+                        <button type="button" class="secondary-button edit-po-btn" data-po-id="${po.po_id}">
+                            ✏ Edit PO
+                        </button>
+                    ` : ""}
+                    ${po.status === "DRAFT" ? `
+                        <button type="button" class="secondary-button reselect-po-btn"
+                            data-po-id="${po.po_id}"
+                            data-po-number="${escapeHtml(po.po_number || "")}">
+                            ↩ Change Vendor
+                        </button>
+                        <button type="button" class="danger-button cancel-po-btn"
+                            data-po-id="${po.po_id}"
+                            data-po-number="${escapeHtml(po.po_number || "")}">
+                            ✕ Cancel Requirement
+                        </button>
+                    ` : ""}
+                    ${po.status === "ISSUED" ? `
+                        <button type="button" class="danger-button cancel-po-btn"
+                            data-po-id="${po.po_id}"
+                            data-po-number="${escapeHtml(po.po_number || "")}">
+                            ✕ Cancel Requirement
+                        </button>
+                    ` : ""}
+                </div>
                 </div>
 
-                <div class="vendor-details-panel" id="vendorDetailsPanel-${po.po_id}">
+                <!-- Inline Edit Container (matches user's screenshot exactly) -->
+                <div class="po-edit-container" id="poEditContainer-${po.po_id}" style="display:none;">
+                    <div class="po-edit-grid">
+                        <!-- Row 1 -->
+                        <div class="po-field-group">
+                            <label>PO Date</label>
+                            <input type="text" class="po-field-readonly" value="${formatDate(po.po_date)}" readonly disabled />
+                        </div>
+                        <div class="po-field-group">
+                            <label>PR Number</label>
+                            <input type="text" class="po-field-readonly" value="${escapeHtml(po.pr_number || "-")}" readonly disabled />
+                        </div>
+                        <div class="po-field-group">
+                            <label>PR Date</label>
+                            <input type="text" class="po-field-readonly" value="${formatDate(po.pr_date)}" readonly disabled />
+                        </div>
+                        <div class="po-field-group">
+                            <label>Vendor Name</label>
+                            <input type="text" class="po-field-readonly" value="${escapeHtml(po.vendor_name || po.party_name || "-")}" readonly disabled />
+                        </div>
+
+                        <!-- Row 2 -->
+                        <div class="po-field-group">
+                            <label>Attendant (ATTN) Name <span class="required-star">*</span></label>
+                            <input type="text" class="po-field-input" id="poEditAttn-${po.po_id}" value="${escapeHtml(po.attn_name || "")}" placeholder="Enter Attendant Name" required />
+                        </div>
+                        <div class="po-field-group">
+                            <label>Location</label>
+                            <input type="text" class="po-field-readonly" value="${escapeHtml(po.location || "-")}" readonly disabled />
+                        </div>
+                        <div class="po-field-group">
+                            <label>Territory</label>
+                            <input type="text" class="po-field-readonly" value="${escapeHtml(po.territory || "-")}" readonly disabled />
+                        </div>
+                        <div class="po-field-group">
+                            <label>Product Category</label>
+                            <input type="text" class="po-field-readonly" value="${escapeHtml(po.product_category || "-")}" readonly disabled />
+                        </div>
+
+                        <!-- Row 3 -->
+                        <div class="po-field-group">
+                            <label>Sub Product Category</label>
+                            <input type="text" class="po-field-readonly" value="${escapeHtml(po.sub_product_category || "-")}" readonly disabled />
+                        </div>
+                        <div class="po-field-group">
+                            <label>Item Name</label>
+                            <input type="text" class="po-field-readonly" value="${escapeHtml(po.item_name || "-")}" readonly disabled />
+                        </div>
+                        <div class="po-field-group">
+                            <label>Make</label>
+                            <input type="text" class="po-field-input" id="poEditMake-${po.po_id}" value="${escapeHtml(po.make || "")}" placeholder="Enter Make" />
+                        </div>
+                        <div class="po-field-group">
+                            <label>Model</label>
+                            <input type="text" class="po-field-input" id="poEditModel-${po.po_id}" value="${escapeHtml(po.model || "")}" placeholder="Enter Model" />
+                        </div>
+
+                        <!-- Row 4 -->
+                        <div class="po-field-group">
+                            <label>Quantity <span class="required-star">*</span></label>
+                            <div class="po-qty-wrap">
+                                <input type="number" step="any" min="0.01" class="po-qty-input" id="poEditQty-${po.po_id}" data-po-id="${po.po_id}" value="${Number(po.qty || 0).toFixed(2)}" />
+                                <span class="po-uom-badge">${escapeHtml(po.unit || "number")}</span>
+                            </div>
+                        </div>
+                        <div class="po-field-group">
+                            <label>Sales Rate <span class="required-star">*</span></label>
+                            <input type="number" step="any" min="0.01" class="po-sales-rate-input" id="poEditSalesRate-${po.po_id}" data-po-id="${po.po_id}" value="${Number(po.sales_rate || po.price_per_unit || 0).toFixed(2)}" placeholder="Enter Sales Rate" />
+                        </div>
+                        <div class="po-field-group">
+                            <label>Taxable Value</label>
+                            <input type="text" class="po-field-readonly" id="poEditTaxable-${po.po_id}" value="${formatCurrency(po.taxable_value || po.total_price)}" readonly disabled />
+                        </div>
+                        <div class="po-field-group">
+                            <label>Product Remarks</label>
+                            <input type="text" class="po-field-readonly" value="${escapeHtml(po.product_remarks || "-")}" readonly disabled />
+                        </div>
+
+                        <!-- Row 5 (Full width) -->
+                        <div class="po-field-group full-width">
+                            <label>Delivery Address <span style="font-size:11px;color:#64748b;font-weight:400;margin-left:4px;">(Optional — Leave empty for Delivery at Our Office)</span></label>
+                            <textarea class="po-delivery-textarea" id="poEditAddr-${po.po_id}" rows="2" placeholder="Leave empty for Delivery at Our Office, or enter site delivery address">${escapeHtml(po.delivery_address || "")}</textarea>
+                        </div>
+                    </div>
+
+                    <!-- Row 6 (Buttons) -->
+                    <div class="po-edit-btn-row">
+                        <button type="button" class="po-save-btn" data-po-id="${po.po_id}">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>Save Changes
+                        </button>
+                        <button type="button" class="po-cancel-btn" data-po-id="${po.po_id}">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>Cancel
+                        </button>
+                    </div>
+                </div>
+            
+<div class="vendor-details-panel" id="vendorDetailsPanel-${po.po_id}">
                     <div class="vendor-details-grid">
                         ${vendorDetailField("Vendor Code", po.vendor_code)}
                         ${vendorDetailField("Vendor Name", po.vendor_name)}
@@ -4149,6 +4326,48 @@ function renderPurchaseOrders(orders) {
 
 // ─── Purchase Orders: Expand Row + Toggle Vendor Details ──────────────────────
 
+
+// ─── Purchase Orders: Inline Card Edit Helpers ─────────────────────────────────
+
+function togglePoInlineEdit(poId, showEdit) {
+    const viewContainer = document.getElementById(`poViewContainer-${poId}`);
+    const editContainer = document.getElementById(`poEditContainer-${poId}`);
+    if (!viewContainer || !editContainer) return;
+
+    if (showEdit) {
+        viewContainer.style.display = "none";
+        editContainer.style.display = "block";
+        const attnInput = document.getElementById(`poEditAttn-${poId}`);
+        const qtyInput = document.getElementById(`poEditQty-${poId}`);
+        if (attnInput && !attnInput.value.trim()) {
+            attnInput.focus();
+        } else if (qtyInput) {
+            qtyInput.focus();
+            qtyInput.select();
+        }
+    } else {
+        const po = (allPurchaseOrders || []).find(p => Number(p.po_id) === Number(poId));
+        if (po) {
+            const attnInput = document.getElementById(`poEditAttn-${poId}`);
+            const qtyInput = document.getElementById(`poEditQty-${poId}`);
+            const rateInput = document.getElementById(`poEditSalesRate-${poId}`);
+            const addrInput = document.getElementById(`poEditAddr-${poId}`);
+            const taxableInput = document.getElementById(`poEditTaxable-${poId}`);
+            const makeInput = document.getElementById(`poEditMake-${poId}`);
+            const modelInput = document.getElementById(`poEditModel-${poId}`);
+            if (attnInput) attnInput.value = po.attn_name || "";
+            if (makeInput) makeInput.value = po.make || "";
+            if (modelInput) modelInput.value = po.model || "";
+            if (qtyInput) qtyInput.value = Number(po.qty || 0).toFixed(2);
+            if (rateInput) rateInput.value = Number(po.sales_rate || po.price_per_unit || 0).toFixed(2);
+            if (addrInput) addrInput.value = po.delivery_address || "";
+            if (taxableInput) taxableInput.value = formatCurrency(po.taxable_value || po.total_price);
+        }
+        editContainer.style.display = "none";
+        viewContainer.style.display = "block";
+    }
+}
+
 purchaseOrdersList.addEventListener("click", async event => {
 
     const expandBtn = event.target.closest(".expand-po-btn");
@@ -4158,6 +4377,9 @@ purchaseOrdersList.addEventListener("click", async event => {
         const isOpen = detail.style.display !== "none";
         detail.style.display = isOpen ? "none" : "block";
         expandBtn.textContent = isOpen ? "Expand ▾" : "Collapse ▴";
+        if (isOpen) {
+            togglePoInlineEdit(Number(poId), false);
+        }
         return;
     }
 
@@ -4175,6 +4397,14 @@ purchaseOrdersList.addEventListener("click", async event => {
     const issuePOBtn = event.target.closest(".issue-po-btn");
     if (issuePOBtn) {
         const poId = issuePOBtn.dataset.poId;
+        const po = (allPurchaseOrders || []).find(p => Number(p.po_id) === Number(poId));
+        if (po && (!po.attn_name || !String(po.attn_name).trim())) {
+            alert("Attendant (ATTN) Name is required before issuing the Purchase Order. Please edit the PO and enter the Attendant Name.");
+            togglePoInlineEdit(Number(poId), true);
+            const attnInp = document.getElementById(`poEditAttn-${poId}`);
+            if (attnInp) attnInp.focus();
+            return;
+        }
         if (!confirm("Issue this Purchase Order?")) return;
 
         issuePOBtn.disabled    = true;
@@ -4210,6 +4440,114 @@ purchaseOrdersList.addEventListener("click", async event => {
             // Cleanup if needed
         }
 
+        return;
+    }
+
+    
+    const cancelEditBtn = event.target.closest(".po-cancel-btn");
+    if (cancelEditBtn) {
+        const poId = Number(cancelEditBtn.dataset.poId);
+        togglePoInlineEdit(poId, false);
+        return;
+    }
+
+    const saveEditBtn = event.target.closest(".po-save-btn");
+    if (saveEditBtn) {
+        const poId = Number(saveEditBtn.dataset.poId);
+        const po = (allPurchaseOrders || []).find(p => Number(p.po_id) === poId);
+        if (!po) return;
+
+        const attnInput = document.getElementById(`poEditAttn-${poId}`);
+        const makeInput = document.getElementById(`poEditMake-${poId}`);
+        const modelInput = document.getElementById(`poEditModel-${poId}`);
+        const qtyInput = document.getElementById(`poEditQty-${poId}`);
+        const rateInput = document.getElementById(`poEditSalesRate-${poId}`);
+        const addrInput = document.getElementById(`poEditAddr-${poId}`);
+        if (!attnInput || !qtyInput || !rateInput || !addrInput) return;
+
+        const newAttn = attnInput.value.trim();
+        const newMake = makeInput ? makeInput.value.trim() : (po.make || "");
+        const newModel = modelInput ? modelInput.value.trim() : (po.model || "");
+        if (!newAttn) {
+            alert("Attendant (ATTN) Name is required.");
+            attnInput.focus();
+            return;
+        }
+
+        const newQty = parseFloat(qtyInput.value);
+        if (isNaN(newQty) || newQty <= 0) {
+            alert("Please enter a valid numeric quantity greater than 0.");
+            qtyInput.focus();
+            return;
+        }
+
+        const newSalesRate = parseFloat(rateInput.value);
+        if (isNaN(newSalesRate) || newSalesRate <= 0) {
+            alert("Please enter a valid numeric Sales Rate greater than 0.");
+            rateInput.focus();
+            return;
+        }
+
+        const newAddr = addrInput.value.trim();
+        const deliveryType = newAddr ? "DIRECT_SITE" : "OFFICE";
+
+        saveEditBtn.disabled = true;
+        const origHtml = saveEditBtn.innerHTML;
+        saveEditBtn.innerHTML = "Saving...";
+
+        try {
+            const response = await apiFetch(`/purchase-orders/${poId}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    qty: newQty,
+                    sales_rate: newSalesRate,
+                    price_per_unit: newSalesRate,
+                    attn_name: newAttn,
+                    make: newMake,
+                    model: newModel,
+                    delivery_address: newAddr || null,
+                    delivery_type: deliveryType
+                })
+            });
+
+            if (!response) {
+                saveEditBtn.disabled = false;
+                saveEditBtn.innerHTML = origHtml;
+                return;
+            }
+            const result = await response.json().catch(() => ({}));
+
+            if (!response.ok || !result.success) {
+                alert(result.message || "Failed to update purchase order.");
+                saveEditBtn.disabled = false;
+                saveEditBtn.innerHTML = origHtml;
+                return;
+            }
+
+            alert("Purchase Order updated successfully.");
+            await loadPurchaseOrders();
+
+            // Re-expand the edited PO in view mode
+            const detail = document.getElementById(`poDetail-${poId}`);
+            if (detail) {
+                detail.style.display = "block";
+                const expBtn = detail.parentElement?.querySelector(".expand-po-btn");
+                if (expBtn) expBtn.textContent = "Collapse ▴";
+            }
+        } catch (err) {
+            console.error("Save PO error:", err);
+            alert("Failed to save purchase order.");
+            saveEditBtn.disabled = false;
+            saveEditBtn.innerHTML = origHtml;
+        }
+        return;
+    }
+
+    const editPoBtn = event.target.closest(".edit-po-btn");
+    if (editPoBtn) {
+        const poId = Number(editPoBtn.dataset.poId);
+        togglePoInlineEdit(poId, true);
         return;
     }
 
@@ -5746,7 +6084,34 @@ function setupPrDependentSubcategory() {
 }
 
 if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", setupPrDependentSubcategory);
+    
+// ─── Purchase Orders: Live Quantity Input Calculation ─────────────────────────
+purchaseOrdersList?.addEventListener("input", event => {
+    const qtyInput = event.target.closest(".po-qty-input");
+    const rateInput = event.target.closest(".po-sales-rate-input");
+    if (!qtyInput && !rateInput) return;
+
+    const poId = Number((qtyInput || rateInput).dataset.poId);
+    const po = (allPurchaseOrders || []).find(p => Number(p.po_id) === poId);
+    if (!po) return;
+
+    const currentQtyInput = document.getElementById(`poEditQty-${poId}`);
+    const currentRateInput = document.getElementById(`poEditSalesRate-${poId}`);
+    const taxableInput = document.getElementById(`poEditTaxable-${poId}`);
+
+    const q = parseFloat(currentQtyInput?.value);
+    const r = parseFloat(currentRateInput?.value);
+
+    if (taxableInput) {
+        if (!isNaN(q) && q >= 0 && !isNaN(r) && r >= 0) {
+            taxableInput.value = formatCurrency(q * r);
+        } else {
+            taxableInput.value = "-";
+        }
+    }
+});
+
+document.addEventListener("DOMContentLoaded", setupPrDependentSubcategory);
 } else {
     loadPrProductCategories();
     setupPrDependentSubcategory();
@@ -5793,3 +6158,259 @@ async function loadPrProductCategories() {
     }
 }
 window.loadPrProductCategories = loadPrProductCategories;
+
+
+// ─── PO Edit Modal & Revision Tracking ──────────────────────────────────────────
+let currentEditingPo = null;
+
+function openEditPoModal(poId) {
+    const po = (allPurchaseOrders || []).find(p => Number(p.po_id) === Number(poId));
+    if (!po) return alert("Purchase order not found");
+    currentEditingPo = po;
+
+    const modal = document.getElementById("editPoModal");
+    if (!modal) return;
+
+    const subTitle = document.getElementById("editPoSubtitle");
+    if (subTitle) {
+        subTitle.textContent = `${po.po_number || "PO"} | Party: ${po.party_name || "-"} | Item: ${po.item_name || "-"}`;
+    }
+
+    const revNotice = document.getElementById("editPoRevNotice");
+    const nextRevSpan = document.getElementById("editPoNextRevNum");
+    if (revNotice) {
+        if (po.status === "ISSUED") {
+            revNotice.style.display = "block";
+            if (nextRevSpan) nextRevSpan.textContent = String((Number(po.revision_number) || 0) + 1);
+        } else {
+            revNotice.style.display = "none";
+        }
+    }
+
+    // Attendant (ATTN) Name, Quantity, Sales Rate & Live Price Calculation
+    const attnInput = document.getElementById("editPoAttnName");
+    if (attnInput) {
+        attnInput.value = po.attn_name || "";
+    }
+    const makeInput = document.getElementById("editPoMake");
+    if (makeInput) {
+        makeInput.value = po.make || "";
+    }
+    const modelInput = document.getElementById("editPoModel");
+    if (modelInput) {
+        modelInput.value = po.model || "";
+    }
+
+    const qtyInput = document.getElementById("editPoQty");
+    const salesRateInput = document.getElementById("editPoSalesRate");
+    const unitSpan = document.getElementById("editPoUnit");
+    const unitRateEl = document.getElementById("editPoUnitRate");
+    const totalPriceEl = document.getElementById("editPoTotalPrice");
+
+    if (qtyInput) {
+        qtyInput.value = Number(po.qty || 1);
+    }
+    if (salesRateInput) {
+        salesRateInput.value = Number(po.sales_rate || po.price_per_unit || 0);
+    }
+    if (unitSpan) {
+        unitSpan.textContent = po.unit || "nos";
+    }
+
+    function updatePricePreview() {
+        const q = Number(qtyInput?.value || 0);
+        const r = Number(salesRateInput?.value || po.sales_rate || po.price_per_unit || 0);
+        const tot = Math.max(0, q * r);
+        if (unitRateEl) unitRateEl.textContent = formatCurrency(r);
+        if (totalPriceEl) totalPriceEl.textContent = formatCurrency(tot);
+    }
+    updatePricePreview();
+    if (qtyInput) {
+        qtyInput.oninput = updatePricePreview;
+    }
+    if (salesRateInput) {
+        salesRateInput.oninput = updatePricePreview;
+    }
+
+    const officeRadio = document.getElementById("editPoDelivOffice");
+    const siteRadio = document.getElementById("editPoDelivSite");
+    const addressContainer = document.getElementById("editPoAddressContainer");
+    const addressTextarea = document.getElementById("editPoDeliveryAddress");
+
+    const isSite = po.delivery_type === "DIRECT_SITE";
+    if (officeRadio) officeRadio.checked = !isSite;
+    if (siteRadio) siteRadio.checked = isSite;
+    if (addressContainer) addressContainer.style.display = isSite ? "block" : "none";
+
+    const defaultSiteAddress = `${po.party_name || ""}, ${po.location || ""}`.trim();
+    if (addressTextarea) {
+        addressTextarea.value = po.delivery_address || defaultSiteAddress;
+    }
+
+    // Timezone-safe Expected Delivery Date (YYYY-MM-DD)
+    const expectedDateInput = document.getElementById("editPoExpectedDate");
+    if (expectedDateInput) {
+        const dateVal = po.expected_delivery_date || po.viv_expected_delivery_date;
+        expectedDateInput.value = toDateInputValue(dateVal);
+    }
+
+    // Payment Terms / Remarks (Pre-fill with quotation terms if empty)
+    const paymentRemarksInput = document.getElementById("editPoPaymentRemarks");
+    if (paymentRemarksInput) {
+        paymentRemarksInput.value = po.payment_terms_remarks || getDerivedPaymentTerms(po) || "";
+    }
+
+    const msgEl = document.getElementById("editPoModalMsg");
+    if (msgEl) {
+        msgEl.textContent = "";
+        msgEl.style.color = "";
+    }
+
+    modal.classList.remove("hidden");
+}
+
+function closeEditPoModal() {
+    const modal = document.getElementById("editPoModal");
+    if (modal) modal.classList.add("hidden");
+    currentEditingPo = null;
+}
+
+async function saveEditPoModal() {
+    if (!currentEditingPo) return;
+
+    const saveBtn = document.getElementById("saveEditPoModalBtn");
+    const msgEl = document.getElementById("editPoModalMsg");
+
+    // Validate Attendant Name
+    const attnInput = document.getElementById("editPoAttnName");
+    const newAttn = (attnInput?.value || "").trim();
+    if (!newAttn) {
+        if (msgEl) {
+            msgEl.textContent = "Please enter the Attendant (ATTN) Name.";
+            msgEl.style.color = "#ef4444";
+        }
+        attnInput?.focus();
+        return;
+    }
+
+    // Validate Quantity
+    const qtyInput = document.getElementById("editPoQty");
+    const newQty = Number(qtyInput?.value || 0);
+    if (isNaN(newQty) || newQty <= 0) {
+        if (msgEl) {
+            msgEl.textContent = "Please enter a valid quantity greater than 0.";
+            msgEl.style.color = "#ef4444";
+        }
+        qtyInput?.focus();
+        return;
+    }
+
+    // Validate Sales Rate
+    const salesRateInput = document.getElementById("editPoSalesRate");
+    const newSalesRate = Number(salesRateInput?.value || 0);
+    if (isNaN(newSalesRate) || newSalesRate <= 0) {
+        if (msgEl) {
+            msgEl.textContent = "Please enter a valid sales rate greater than 0.";
+            msgEl.style.color = "#ef4444";
+        }
+        salesRateInput?.focus();
+        return;
+    }
+
+    const siteRadio = document.getElementById("editPoDelivSite");
+    const isDirectSite = siteRadio?.checked;
+    const addressTextarea = document.getElementById("editPoDeliveryAddress");
+    const deliveryAddress = isDirectSite ? (addressTextarea?.value || "").trim() : null;
+
+    if (isDirectSite && !deliveryAddress) {
+        if (msgEl) {
+            msgEl.textContent = "Please enter the site delivery address.";
+            msgEl.style.color = "#ef4444";
+        }
+        return;
+    }
+
+    const expectedDateInput = document.getElementById("editPoExpectedDate");
+    const expectedDate = expectedDateInput?.value ? expectedDateInput.value.trim() : null;
+
+    const paymentRemarksInput = document.getElementById("editPoPaymentRemarks");
+    const paymentRemarks = (paymentRemarksInput?.value || "").trim() || null;
+
+    try {
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.textContent = "Saving...";
+        }
+        if (msgEl) {
+            msgEl.textContent = "Updating purchase order...";
+            msgEl.style.color = "#0284c7";
+        }
+
+        const makeInput = document.getElementById("editPoMake");
+        const modelInput = document.getElementById("editPoModel");
+        const newMake = makeInput ? makeInput.value.trim() : "";
+        const newModel = modelInput ? modelInput.value.trim() : "";
+
+        const res = await apiFetch(`/purchase-orders/${currentEditingPo.po_id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                qty: newQty,
+                sales_rate: newSalesRate,
+                price_per_unit: newSalesRate,
+                attn_name: newAttn,
+                make: newMake,
+                model: newModel,
+                delivery_type: isDirectSite ? "DIRECT_SITE" : "OFFICE",
+                delivery_address: deliveryAddress,
+                expected_delivery_date: expectedDate,
+                payment_terms_remarks: paymentRemarks
+            })
+        });
+
+        if (!res) return;
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.success) {
+            throw new Error(data.message || "Failed to update purchase order");
+        }
+
+        const savedPoId = currentEditingPo.po_id;
+        alert(data.message || "Purchase order updated successfully!");
+        closeEditPoModal();
+        await loadPurchaseOrders();
+
+        const detail = document.getElementById(`poDetail-${savedPoId}`);
+        if (detail) {
+            detail.style.display = "block";
+            const expandBtn = detail.parentElement?.querySelector(".expand-po-btn");
+            if (expandBtn) expandBtn.textContent = "Collapse ▴";
+        }
+
+    } catch (err) {
+        console.error("Save PO error:", err);
+        if (msgEl) {
+            msgEl.textContent = err.message || "Failed to update purchase order";
+            msgEl.style.color = "#ef4444";
+        }
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Save Changes";
+        }
+    }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("editPoDelivOffice")?.addEventListener("change", () => {
+        const ac = document.getElementById("editPoAddressContainer");
+        if (ac) ac.style.display = "none";
+    });
+    document.getElementById("editPoDelivSite")?.addEventListener("change", () => {
+        const ac = document.getElementById("editPoAddressContainer");
+        if (ac) ac.style.display = "block";
+    });
+    document.getElementById("closeEditPoModalBtn")?.addEventListener("click", closeEditPoModal);
+    document.getElementById("cancelEditPoModalBtn")?.addEventListener("click", closeEditPoModal);
+    document.getElementById("saveEditPoModalBtn")?.addEventListener("click", saveEditPoModal);
+});

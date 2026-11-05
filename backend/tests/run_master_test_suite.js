@@ -166,7 +166,7 @@ async function runAllTests() {
 
     try {
         const poNumber = await sequenceService.generatePoNumber(null, "NEE/26-27/PR/0045");
-        assert.strictEqual(poNumber, "NEE/26-27/PO/0045");
+        assert.strictEqual(poNumber, "NEE/26-27/PROC/0045");
         pass("sequenceService.generatePoNumber() derives PO from PR accurately", poNumber);
     } catch (e) { fail("sequenceService.generatePoNumber()", e); }
 
@@ -653,6 +653,36 @@ async function runAllTests() {
         assert(res.data instanceof Buffer && res.data.length > 500);
         pass("GET /purchase-orders/export exports Purchase Orders Excel summary report", `${res.data.length} bytes`);
     } catch (e) { fail("GET /purchase-orders/export", e); }
+
+    try {
+        const res = await apiRequest({
+            method: "POST",
+            path: `/purchase-orders/${testPoId}/issue`,
+            token: procurementToken,
+            headers: { "Accept": "application/json" }
+        });
+        assert.strictEqual(res.status, 400);
+        pass("POST /purchase-orders/:id/issue rejects empty ATTN Name with 400 validation error");
+    } catch (e) { fail("POST /purchase-orders/:id/issue empty ATTN", e); }
+
+    try {
+        const res = await apiRequest({
+            method: "PUT",
+            path: `/purchase-orders/${testPoId}`,
+            token: procurementToken,
+            body: {
+                quantity: 25,
+                sales_rate: 2700,
+                make: "Philips Pro",
+                model: "BY698P-Gen2",
+                delivery_address: "Dahej Plant Gate 1",
+                attn_name: "Mr. Sharma"
+            }
+        });
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(res.data.success, true);
+        pass("PUT /purchase-orders/:id updates Quantity, Sales Rate, Make, Model, ATTN Name and recalculates total price");
+    } catch (e) { fail("PUT /purchase-orders/:id", e); }
 
     try {
         const res = await apiRequest({

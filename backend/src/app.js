@@ -62,6 +62,7 @@ const { memoryUpload: upload, excelUpload } = require("./middleware/upload.middl
 const vendorFolder = path.resolve(__dirname, "../vendor");
 const poFolder      = path.resolve(__dirname, "../purchase-orders");
 const headerImgPath = path.resolve(__dirname, "../PO header.png");
+const fontDir       = path.resolve(__dirname, "../fonts");
 
 app.use(securityHeaders);
 app.use(express.json());
@@ -270,11 +271,69 @@ function describePayment(q) {
     return text;
 }
 
+// Derives payment terms description from PO or linked quotation
+function derivePaymentTerms(po) {
+    if (!po) return null;
+    if (po.payment_terms_remarks && String(po.payment_terms_remarks).trim()) {
+        return String(po.payment_terms_remarks).trim();
+    }
+    const type = String(po.payment_type || po.viv_payment_type || "").toUpperCase();
+    const advVal = (po.advance_value !== null && po.advance_value !== undefined && po.advance_value !== "")
+        ? Number(po.advance_value)
+        : (po.viv_advance_value !== null && po.viv_advance_value !== undefined && po.viv_advance_value !== "" ? Number(po.viv_advance_value) : null);
+
+    const dueDays = (po.balance_due_days !== null && po.balance_due_days !== undefined && po.balance_due_days !== "")
+        ? Number(po.balance_due_days)
+        : (po.viv_balance_due_days !== null && po.viv_balance_due_days !== undefined && po.viv_balance_due_days !== "" ? Number(po.viv_balance_due_days) : null);
+
+    if (type === "ADVANCE" || (advVal !== null && advVal >= 100)) {
+        return advVal ? `Payment will be ${advVal}% advance.` : "Payment will be 100% advance.";
+    }
+    if (type === "ADVANCE_PLUS_BALANCE" || (advVal !== null && dueDays !== null)) {
+        const adv = advVal !== null ? `${advVal}% advance` : "advance";
+        const bal = dueDays !== null ? `balance payment after ${dueDays} days` : "balance on delivery";
+        return `Payment will be ${adv}, ${bal}.`;
+    }
+    if (dueDays !== null && dueDays > 0) {
+        return `Payment will be ${dueDays} days credit.`;
+    }
+    if (po.viv_payment_terms_remarks && String(po.viv_payment_terms_remarks).trim()) {
+        return String(po.viv_payment_terms_remarks).trim();
+    }
+    if (po.viv_remarks && String(po.viv_remarks).trim()) {
+        return String(po.viv_remarks).trim();
+    }
+    if (po.quotation_remarks && String(po.quotation_remarks).trim()) {
+        return String(po.quotation_remarks).trim();
+    }
+    return null;
+}
+
 /* ==========================================================================
    GENERAL HELPERS
    ========================================================================== */
 
 // Trims strings and converts empty / "-" values to null
+// Formats any date value (Date object, string, etc.) into YYYY-MM-DD for MySQL DATE columns safely
+function formatDateForDb(val) {
+    if (!val) return null;
+    if (typeof val === "string") {
+        const s = val.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    }
+    const d = (val instanceof Date) ? val : new Date(val);
+    if (isNaN(d.getTime())) return null;
+    try {
+        return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    } catch (e) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    }
+}
+
 function cleanValue(value) {
     if (value === null || value === undefined) return null;
     if (typeof value === "string") {
@@ -398,7 +457,7 @@ function getFileExtension(filename) {
 
 // Derives the PO number from the PR number by swapping /PR/ for /PO/
 async function generatePoNumber(connection, prNumber) {
-    return prNumber.replace("/PR/", "/PO/");
+    return prNumber.replace("/PR/", "/PROC/");
 }
 
 /* ==========================================================================
@@ -548,6 +607,45 @@ function validateVendorData(data, files) {
     const requiredDocuments = []; // All documents are optional
     const missingDocuments = [];
     const invalidFields = [];
+
+    if (data) {
+        const vName = cleanValue(data.vendor_name);
+        if (vName && /^\d+$/.test(vName)) {
+            invalidFields.push("Vendor name cannot be only numbers");
+        }
+
+        const personFields = [
+            "office_contact_name",
+            "factory_contact_name",
+            "warehouse_contact_name",
+            "director_or_ceo_or_management_name",
+            "recommended_by"
+        ];
+        for (const f of personFields) {
+            const val = cleanValue(data[f]);
+            if (val && /\d/.test(val)) {
+                invalidFields.push(`${f.replace(/_/g, " ")} cannot contain numbers`);
+            }
+        }
+
+        const phoneFields = [
+            "office_contact_number",
+            "factory_contact_number",
+            "warehouse_contact_number",
+            "director_or_ceo_or_management_mobile_no",
+            "sales_team_contact",
+            "accounts_team_contact"
+        ];
+        for (const f of phoneFields) {
+            const val = cleanValue(data[f]);
+            if (val) {
+                const digits = String(val).replace(/\D/g, "");
+                if (digits.length !== 10) {
+                    invalidFields.push(`${f.replace(/_/g, " ")} must be a valid 10-digit number`);
+                }
+            }
+        }
+    }
     return { missingFields, missingDocuments, invalidFields };
 }
 
@@ -879,7 +977,6 @@ function generatePoPdf(po) {
             const stream = fs.createWriteStream(outputPath);
             doc.pipe(stream);
 
-            const fontDir = path.resolve(__dirname, "../fonts");
             doc.registerFont("Arial", path.join(fontDir, "ARIAL.TTF"));
             doc.registerFont("Arial-Bold", path.join(fontDir, "ARIALBD.TTF"));
             doc.registerFont("Calibri", path.join(fontDir, "CALIBRI.TTF"));
@@ -940,7 +1037,7 @@ function generatePoPdf(po) {
             rect(ML, vendorY, MW, vendorH);
 
             const splitX = 316.3; // Matches lower table column 2 border cleanly
-            const colDivider = 416; // Divider between Label and Value in PO table
+            const colDivider = 390; // Balanced divider giving ~74pt for labels and ~126pt for dynamic values
 
             line(splitX, vendorY, splitX, vendorY + vendorH);
             line(colDivider, vendorY, colDivider, vendorY + vendorH);
@@ -953,47 +1050,83 @@ function generatePoPdf(po) {
 
             let vendorTextY = vendorY + 16;
             if (vendorName) {
-                doc.font("Arial-Bold").fontSize(8.5).text(vendorName, ML + 4, vendorTextY, { width: splitX - ML - 8, lineBreak: false });
+                let nameSize = 8.5;
+                doc.font("Arial-Bold");
+                while (nameSize > 6.5 && doc.fontSize(nameSize).widthOfString(vendorName) > splitX - ML - 8) {
+                    nameSize -= 0.2;
+                }
+                doc.fontSize(nameSize).text(vendorName, ML + 4, vendorTextY, { width: splitX - ML - 8, lineBreak: false });
                 vendorTextY += 12;
             }
             if (vendorAddress) {
-                doc.font("Arial").fontSize(8).text(vendorAddress, ML + 4, vendorTextY, { width: splitX - ML - 8, lineGap: 1 });
-                const addrH = doc.heightOfString(vendorAddress, { width: splitX - ML - 8, lineGap: 1 });
+                let addrSize = 8.0;
+                doc.font("Arial");
+                let addrH = doc.fontSize(addrSize).heightOfString(vendorAddress, { width: splitX - ML - 8, lineGap: 1 });
+                while (addrH > 38 && addrSize > 6.5) {
+                    addrSize -= 0.3;
+                    addrH = doc.fontSize(addrSize).heightOfString(vendorAddress, { width: splitX - ML - 8, lineGap: 1 });
+                }
+                doc.fontSize(addrSize).text(vendorAddress, ML + 4, vendorTextY, { width: splitX - ML - 8, lineGap: 1 });
                 vendorTextY += addrH + 4;
             }
             if (vendorGst) {
-                doc.font("Arial-Bold").fontSize(8.5).text(`GST: ${vendorGst}`, ML + 4, vendorTextY, { width: splitX - ML - 8, lineBreak: false });
+                doc.font("Arial-Bold").fontSize(8.5).text(`GST: ${vendorGst}`, ML + 4, Math.min(vendorTextY, vendorY + vendorH - 12), { width: splitX - ML - 8, lineBreak: false });
             }
 
-            // Right: Order References Table (6 rows x 14pt height = 84pt)
-            const companyGst = process.env.GST_NUMBER || "24AAHPS5083K1ZO";
-            const rowH = 14;
+            // Right: Order References Table (4 rows x 21pt height = 84pt)
+            const companyGst = process.env.GST_NUMBER || "24AMHPS5080K1ZO";
+            const rowH = 21;
+            const poNumberDisplay = (po.revision_number && Number(po.revision_number) > 0)
+                ? `${po.po_number || "-"} - Rev ${po.revision_number}`
+                : (po.po_number || "-");
             const refRows = [
-                { label: "REF. P.O. NO.", val: po.po_number || "-", boldVal: true },
+                { label: "REF. P.O. NO.", val: poNumberDisplay, boldVal: true },
                 { label: "P.O. DATE",      val: fmtDate(po.po_date || po.created_at) },
-                { label: "REF. P.R. NO.", val: po.pr_number || "-" },
-                { label: "P.R. DATE",      val: fmtDate(po.pr_date || po.created_at) },
                 { label: "GST NO.",        val: companyGst },
                 { label: "VENDOR CODE",    val: po.vendor_code || "-" }
             ];
+
+            const availLabelWidth = colDivider - splitX - 6;
+            const availValWidth = MR - colDivider - 8;
 
             refRows.forEach((r, idx) => {
                 const currentY = vendorY + idx * rowH;
                 if (idx > 0) {
                     line(splitX, currentY, MR, currentY);
                 }
-                const textY = currentY + 3.2;
-                // Label
-                doc.font("Arial-Bold").fontSize(8.2).text(r.label, splitX + 4, textY, { width: colDivider - splitX - 6, lineBreak: false });
-                // Value
-                doc.font(r.boldVal ? "Arial-Bold" : "Arial").fontSize(8.2).text(r.val, colDivider + 4, textY, { width: MR - colDivider - 6, lineBreak: false });
+                const textY = currentY + 6;
+
+                // Dynamically fit label if necessary
+                let labelFontSize = 8.2;
+                doc.font("Arial-Bold");
+                while (labelFontSize > 6.5 && doc.fontSize(labelFontSize).widthOfString(r.label) > availLabelWidth) {
+                    labelFontSize -= 0.2;
+                }
+                doc.fontSize(labelFontSize).text(r.label, splitX + 4, textY, { width: availLabelWidth, lineBreak: false });
+
+                // Dynamically fit value (auto-scale font size down to ensure it NEVER wraps onto 2nd line)
+                const valStr = String(r.val || "").trim();
+                let valFontSize = 8.2;
+                doc.font(r.boldVal ? "Arial-Bold" : "Arial");
+                while (valFontSize > 6.0 && doc.fontSize(valFontSize).widthOfString(valStr) > availValWidth) {
+                    valFontSize -= 0.2;
+                }
+                const adjustedValY = textY + (valFontSize < 8.0 ? (8.2 - valFontSize) * 0.3 : 0);
+                doc.fontSize(valFontSize).text(valStr, colDivider + 4, adjustedValY, { width: availValWidth, lineBreak: false });
             });
 
             // 4. Attention Box
             const attnY = 298.1;
             const attnH = 21.5;
             rect(ML, attnY, MW, attnH);
-            doc.font("Arial-Bold").fontSize(9).text(`ATTN. : ${po.vendor_name || ""}`, ML, attnY + 5.5, {
+            const attnPerson = String(po.attn_name || po.office_contact_name || "").trim();
+            const attnText = `ATTN. : ${attnPerson}`;
+            let attnSize = 9.0;
+            doc.font("Arial-Bold");
+            while (attnSize > 6.5 && doc.fontSize(attnSize).widthOfString(attnText) > MW - 12) {
+                attnSize -= 0.2;
+            }
+            doc.fontSize(attnSize).text(attnText, ML, attnY + 5.5, {
                 width: MW,
                 align: "center",
                 lineBreak: false
@@ -1028,10 +1161,25 @@ function generatePoPdf(po) {
 
             // Item row
             const itemTop = tableHeaderY + headerH;
-            const itemDesc = [po.item_name, po.make, po.model].filter(Boolean).join(" / ");
             doc.font("Calibri").fontSize(7.56);
             doc.text("1", x0, itemTop + 4, { width: x1 - x0, align: "center", lineBreak: false });
-            doc.text(itemDesc, x1 + 4, itemTop + 4, { width: x2 - x1 - 8, align: "left", lineBreak: false });
+
+            // Item Name on top, next line make, and below that model no
+            let currentItemY = itemTop + 4;
+            const descWidth = x2 - x1 - 8;
+            if (po.item_name) {
+                doc.font("Calibri-Bold").fontSize(7.56).text(po.item_name, x1 + 4, currentItemY, { width: descWidth, lineGap: 1 });
+                currentItemY += doc.heightOfString(po.item_name, { width: descWidth, lineGap: 1 }) + 2;
+            }
+            if (po.make) {
+                doc.font("Calibri").fontSize(7.56).text(po.make, x1 + 4, currentItemY, { width: descWidth, lineGap: 1 });
+                currentItemY += doc.heightOfString(po.make, { width: descWidth, lineGap: 1 }) + 2;
+            }
+            if (po.model) {
+                doc.font("Calibri").fontSize(7.56).text(po.model, x1 + 4, currentItemY, { width: descWidth, lineGap: 1 });
+            }
+
+            doc.font("Calibri").fontSize(7.56);
             doc.text(Number(po.qty || 0).toFixed(2), x2, itemTop + 4, { width: x3 - x2, align: "center", lineBreak: false });
             doc.text(fmtCur(po.price_per_unit), x3, itemTop + 4, { width: x4 - x3, align: "center", lineBreak: false });
             doc.text(fmtCur(po.total_price), x4, itemTop + 4, { width: x5 - x4, align: "center", lineBreak: false });
@@ -1052,14 +1200,88 @@ function generatePoPdf(po) {
             line(x0, 607.5, x5, 607.5);
 
             doc.font("Calibri-Bold").fontSize(7.56).text("TERMS & CONDITIONS :", x0, footerY + 3.5, { width: footerSplit - x0, align: "center", lineBreak: false });
-            doc.font("Calibri").fontSize(7.56);
-            doc.text("1", x0, footerY + 19, { width: x1 - x0, align: "center", lineBreak: false });
-            doc.text("2", x0, footerY + 31, { width: x1 - x0, align: "center", lineBreak: false });
-            doc.text("DELIVERY : AT OUR OFFICE.", x1 + 4, footerY + 19, { width: footerSplit - x1 - 8, lineBreak: false });
-            doc.text("TAX : EXTRA", x1 + 4, footerY + 31, { width: footerSplit - x1 - 8, lineBreak: false });
-            if (po.payment_terms_remarks) {
-                doc.text("3", x0, footerY + 43, { width: x1 - x0, align: "center", lineBreak: false });
-                doc.text(po.payment_terms_remarks, x1 + 4, footerY + 43, { width: footerSplit - x1 - 8, lineBreak: false });
+
+            const termWidth = footerSplit - x1 - 8;
+
+            // Condition 1: DELIVERY
+            let cleanAddr = String(po.delivery_address || "").trim();
+            cleanAddr = cleanAddr
+                .replace(/^delivery\s*:\s*/i, "")
+                .replace(/^direct\s*to\s*site\s*[-:]*\s*/i, "")
+                .replace(/\s+,/g, ",")
+                .replace(/\r?\n/g, ", ")
+                .replace(/\s+/g, " ")
+                .trim();
+
+            const deliveryText = (po.delivery_type === "DIRECT_SITE" && cleanAddr)
+                ? `DELIVERY : ${cleanAddr}`
+                : "DELIVERY : AT OUR OFFICE.";
+
+            // Condition 3: PAYMENT TERMS (from custom remarks or quotation terms)
+            const term3 = (po.payment_terms_remarks && String(po.payment_terms_remarks).trim())
+                ? String(po.payment_terms_remarks).trim()
+                : (function() {
+                    const type = String(po.payment_type || po.viv_payment_type || "").toUpperCase();
+                    const advVal = (po.advance_value !== null && po.advance_value !== undefined && po.advance_value !== "")
+                        ? Number(po.advance_value)
+                        : (po.viv_advance_value ? Number(po.viv_advance_value) : null);
+                    const dueDays = (po.balance_due_days !== null && po.balance_due_days !== undefined && po.balance_due_days !== "")
+                        ? Number(po.balance_due_days)
+                        : (po.viv_balance_due_days ? Number(po.viv_balance_due_days) : null);
+                    const hasAdv = advVal !== null && advVal > 0;
+                    const hasDays = dueDays !== null && dueDays > 0;
+
+                    if (type === "ADVANCE" || (hasAdv && advVal >= 100)) {
+                        return advVal
+                            ? `Payment will be ${advVal}% advance.`
+                            : "Payment will be 100% advance.";
+                    }
+                    if (type === "ADVANCE_PLUS_BALANCE" || (hasAdv && hasDays)) {
+                        const adv = hasAdv ? `${advVal}% advance` : "advance";
+                        const bal = hasDays ? `balance payment after ${dueDays} days` : "balance on delivery";
+                        return `Payment will be ${adv}, ${bal}.`;
+                    }
+                    if (hasDays) {
+                        return `Payment will be ${dueDays} days credit.`;
+                    }
+                    if (po.viv_payment_terms_remarks && String(po.viv_payment_terms_remarks).trim()) {
+                        return String(po.viv_payment_terms_remarks).trim();
+                    }
+                    if (po.viv_remarks && String(po.viv_remarks).trim()) {
+                        return String(po.viv_remarks).trim();
+                    }
+                    return null;
+                })();
+
+            // Dynamic adjustment of font size & lineGap so all conditions fit comfortably without border collision
+            let termsFontSize = 7.56;
+            let lineGap = 1.5;
+            doc.font("Calibri").fontSize(termsFontSize);
+            let estimatedH = doc.heightOfString(deliveryText, { width: termWidth, lineGap }) + 12 + (term3 ? doc.heightOfString(term3, { width: termWidth, lineGap }) + 4 : 0);
+            while (estimatedH > 58 && termsFontSize > 6.2) {
+                termsFontSize -= 0.3;
+                lineGap = 1.0;
+                doc.fontSize(termsFontSize);
+                estimatedH = doc.heightOfString(deliveryText, { width: termWidth, lineGap }) + 11 + (term3 ? doc.heightOfString(term3, { width: termWidth, lineGap }) + 3 : 0);
+            }
+
+            doc.font("Calibri").fontSize(termsFontSize);
+            let currentTermY = footerY + 18;
+
+            // Condition 1: DELIVERY
+            doc.text("1", x0, currentTermY, { width: x1 - x0, align: "center", lineBreak: false });
+            doc.text(deliveryText, x1 + 4, currentTermY, { width: termWidth, lineGap });
+            const delivH = doc.heightOfString(deliveryText, { width: termWidth, lineGap });
+            currentTermY += Math.max(delivH, 9) + 3;
+
+            // Condition 2: TAX
+            doc.text("2", x0, currentTermY, { width: x1 - x0, align: "center", lineBreak: false });
+            doc.text("TAX : EXTRA", x1 + 4, currentTermY, { width: termWidth, lineBreak: false });
+            currentTermY += 12;
+
+            if (term3) {
+                doc.text("3", x0, currentTermY, { width: x1 - x0, align: "center", lineBreak: false });
+                doc.text(term3, x1 + 4, currentTermY, { width: termWidth, lineGap });
             }
 
             // Signature block
@@ -2834,7 +3056,7 @@ app.get(["/purchase-requests/export", "/api/purchase-requests/export"], verifyPr
             { header: "Status", key: "status", width: 18, align: "center" },
             { header: "Party / Client Name", key: "party_name", width: 28, align: "left" },
             { header: "Vendor Name", key: "vendor_name", width: 28, align: "left" },
-            { header: "PO Number", key: "po_number", width: 22, align: "center" },
+            { header: "PO Number", key: "po_number", width: 26, align: "center" },
             { header: "Location", key: "location", width: 18, align: "left" },
             { header: "Territory", key: "territory", width: 18, align: "left" },
             { header: "Product Category", key: "product_category", width: 24, align: "left" },
@@ -5431,6 +5653,7 @@ app.post("/vendor-inquiries/:inquiry_id/select-vendor", verifyProcurement, async
         `, [inquiryId]);
         const poNumber = await generatePoNumber(connection, pr.pr_number);
         const poDate   = new Date().toISOString().split("T")[0];
+        const initialAttnName = viv.office_contact_name || null;
         await connection.execute(`
             INSERT INTO purchase_orders (
                 po_number,
@@ -5456,6 +5679,7 @@ app.post("/vendor-inquiries/:inquiry_id/select-vendor", verifyProcurement, async
                 taxable_value,
                 vendor_code,
                 vendor_name,
+                attn_name,
                 vendor_address,
                 price_per_unit,
                 total_price,
@@ -5466,7 +5690,7 @@ app.post("/vendor-inquiries/:inquiry_id/select-vendor", verifyProcurement, async
                 balance_due_days,
                 payment_terms_remarks,
                 status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')
         `, [
             poNumber,
             poDate,
@@ -5491,6 +5715,7 @@ app.post("/vendor-inquiries/:inquiry_id/select-vendor", verifyProcurement, async
             pr.taxable_value,
             viv.vendor_code,
             viv.vendor_name,
+            initialAttnName,
             vendorAddress,
             viv.price_per_unit,
             viv.total_price,
@@ -5499,7 +5724,7 @@ app.post("/vendor-inquiries/:inquiry_id/select-vendor", verifyProcurement, async
             viv.advance_type || null,
             viv.advance_value || null,
             viv.balance_due_days || null,
-            viv.payment_terms_remarks || null
+            viv.payment_terms_remarks || derivePaymentTerms(viv) || null
         ]);
         await connection.commit();
         log(`Vendor selected and PO created - Inquiry ID: ${inquiryId}, PO: ${poNumber}`);
@@ -5567,10 +5792,14 @@ app.get("/purchase-orders", verifyProcurement, async (req, res) => {
                 po.vendor_id,
                 vom.vendor_code,
                 vom.vendor_name,
+                COALESCE(NULLIF(TRIM(po.attn_name), ''), vom.office_contact_name) AS attn_name,
                 po.vendor_address,
                 po.price_per_unit,
                 po.total_price,
                 po.expected_delivery_date,
+                po.delivery_type,
+                po.delivery_address,
+                po.revision_number,
                 po.payment_type,
                 po.advance_type,
                 po.advance_value,
@@ -5673,6 +5902,11 @@ app.get("/purchase-orders", verifyProcurement, async (req, res) => {
                 vom.approved_by,
                 vom.client_details,
                 vom.is_blacklisted,
+                viv.payment_type AS viv_payment_type,
+                viv.advance_value AS viv_advance_value,
+                viv.balance_due_days AS viv_balance_due_days,
+                viv.payment_terms_remarks AS viv_payment_terms_remarks,
+                viv.expected_delivery_date AS viv_expected_delivery_date,
                 viv.remarks AS quotation_remarks
             FROM purchase_orders po
             LEFT JOIN vendor_oem_masters vom
@@ -5681,9 +5915,17 @@ app.get("/purchase-orders", verifyProcurement, async (req, res) => {
                 ON viv.inquiry_vendor_id = po.inquiry_vendor_id
             ORDER BY po.po_id DESC
         `);
+        const mappedOrders = rows.map(r => ({
+            ...r,
+            attn_name: r.attn_name || r.office_contact_name || "",
+            expected_delivery_date: r.expected_delivery_date || r.viv_expected_delivery_date || null,
+            payment_terms_remarks: r.payment_terms_remarks || derivePaymentTerms(r),
+            advance_value: r.advance_value !== null ? r.advance_value : r.viv_advance_value,
+            balance_due_days: r.balance_due_days !== null ? r.balance_due_days : r.viv_balance_due_days
+        }));
         return res.json({
             success: true,
-            purchase_orders: rows
+            purchase_orders: mappedOrders
         });
     } catch (error) {
         console.error(error);
@@ -5746,6 +5988,7 @@ app.get(["/purchase-orders/export", "/api/purchase-orders/export"], verifyProcur
             SELECT
                 po.po_id,
                 po.po_number,
+                po.revision_number,
                 po.po_date,
                 po.status AS po_status,
                 po.pr_id,
@@ -5770,11 +6013,13 @@ app.get(["/purchase-orders/export", "/api/purchase-orders/export"], verifyProcur
                 COALESCE(po.vendor_address, vom.office_address) AS vendor_address,
                 po.price_per_unit,
                 po.total_price,
-                po.expected_delivery_date,
-                po.payment_type,
-                po.advance_type,
-                po.advance_value,
-                po.balance_due_days,
+                COALESCE(po.expected_delivery_date, viv.expected_delivery_date) AS expected_delivery_date,
+                po.delivery_type,
+                po.delivery_address,
+                COALESCE(po.payment_type, viv.payment_type) AS payment_type,
+                COALESCE(po.advance_type, viv.advance_type) AS advance_type,
+                COALESCE(po.advance_value, viv.advance_value) AS advance_value,
+                COALESCE(po.balance_due_days, viv.balance_due_days) AS balance_due_days,
                 po.payment_terms_remarks,
                 po.created_at,
                 vom.commercial_role,
@@ -5944,9 +6189,24 @@ app.get(["/purchase-orders/export", "/api/purchase-orders/export"], verifyProcur
             totalPoAmount += totalPoNum;
             totalSavings += savingsNum;
 
+            const poNumberDisplay = (row.revision_number && Number(row.revision_number) > 0)
+                ? `${row.po_number || "—"} - Rev ${row.revision_number}`
+                : (row.po_number || "—");
+
+            const remarksParts = [];
+            if (row.delivery_type === "DIRECT_SITE" && row.delivery_address) {
+                remarksParts.push(`Delivery: ${row.delivery_address}`);
+            } else if (row.delivery_type === "OFFICE") {
+                remarksParts.push("Delivery: At Our Office");
+            }
+            if (row.payment_terms_remarks) remarksParts.push(`Terms: ${row.payment_terms_remarks}`);
+            if (row.quotation_remarks) remarksParts.push(`Quotation: ${row.quotation_remarks}`);
+            if (row.product_remarks) remarksParts.push(`Item Remarks: ${row.product_remarks}`);
+            const finalRemarks = remarksParts.join(" | ") || "—";
+
             const values = [
                 i + 1,
-                row.po_number || "—",
+                poNumberDisplay,
                 formatDate(row.po_date || row.created_at),
                 row.po_status || "—",
                 row.pr_number || "—",
@@ -5980,7 +6240,7 @@ app.get(["/purchase-orders/export", "/api/purchase-orders/export"], verifyProcur
                 receivedNum,
                 balanceQtyNum,
                 deliveryStatus,
-                row.quotation_remarks || row.payment_terms_remarks || "—"
+                finalRemarks
             ];
 
             const isEven = i % 2 === 1;
@@ -6084,6 +6344,225 @@ app.get(["/purchase-orders/export", "/api/purchase-orders/export"], verifyProcur
     }
 });
 
+// PUT /purchase-orders/:po_id - Edits a purchase order (delivery type/address, expected date, payment terms, remarks)
+app.put(["/purchase-orders/:po_id", "/api/purchase-orders/:po_id"], verifyProcurement, async (req, res) => {
+    const poId = Number(req.params.po_id);
+    if (!Number.isInteger(poId) || poId <= 0) {
+        return res.status(400).json({ success: false, message: "Invalid PO ID" });
+    }
+
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const [rows] = await connection.execute(
+            `SELECT po.*,
+                COALESCE(po.vendor_address, vom.office_address) AS vendor_address,
+                vom.gst_number AS vendor_gst,
+                vom.office_contact_name,
+                vom.office_contact_number,
+                viv.payment_type AS viv_payment_type,
+                viv.advance_value AS viv_advance_value,
+                viv.balance_due_days AS viv_balance_due_days,
+                viv.payment_terms_remarks AS viv_payment_terms_remarks,
+                viv.expected_delivery_date AS viv_expected_delivery_date,
+                viv.remarks AS quotation_remarks
+             FROM purchase_orders po
+             LEFT JOIN vendor_oem_masters vom ON vom.vendor_id = po.vendor_id
+             LEFT JOIN vendor_inquiry_vendors viv ON viv.inquiry_vendor_id = po.inquiry_vendor_id
+             WHERE po.po_id = ? FOR UPDATE`,
+            [poId]
+        );
+
+        if (!rows.length) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: "Purchase Order not found" });
+        }
+
+        const currentPo = rows[0];
+        if (currentPo.status === "COMPLETED" || currentPo.status === "CANCELLED") {
+            await connection.rollback();
+            return res.status(400).json({ success: false, message: `Cannot edit a ${currentPo.status} Purchase Order.` });
+        }
+
+        // Quantity & Sales Rate editing & live price recalculation
+        let newQty = Number(currentPo.qty);
+        if (req.body.qty !== undefined && req.body.qty !== null && req.body.qty !== "") {
+            const parsedQty = Number(req.body.qty);
+            if (isNaN(parsedQty) || parsedQty <= 0) {
+                await connection.rollback();
+                return res.status(400).json({ success: false, message: "Order quantity must be a positive number." });
+            }
+            newQty = parsedQty;
+        }
+
+        let newSalesRate = Number(currentPo.sales_rate || currentPo.price_per_unit || 0);
+        if (req.body.sales_rate !== undefined && req.body.sales_rate !== null && req.body.sales_rate !== "") {
+            const parsedRate = Number(req.body.sales_rate);
+            if (isNaN(parsedRate) || parsedRate <= 0) {
+                await connection.rollback();
+                return res.status(400).json({ success: false, message: "Sales rate must be a positive number." });
+            }
+            newSalesRate = parsedRate;
+        } else if (req.body.price_per_unit !== undefined && req.body.price_per_unit !== null && req.body.price_per_unit !== "") {
+            const parsedRate = Number(req.body.price_per_unit);
+            if (isNaN(parsedRate) || parsedRate <= 0) {
+                await connection.rollback();
+                return res.status(400).json({ success: false, message: "Price per unit must be a positive number." });
+            }
+            newSalesRate = parsedRate;
+        }
+
+        const newTotalPrice = Math.round(newQty * newSalesRate * 100) / 100;
+        const newTaxableValue = Math.round(newQty * newSalesRate * 100) / 100;
+        const newPricePerUnit = newSalesRate;
+
+        // Make and Model handling (editable)
+        const make = req.body.make !== undefined ? (cleanValue(req.body.make) || null) : currentPo.make;
+        const model = req.body.model !== undefined ? (cleanValue(req.body.model) || null) : currentPo.model;
+
+        // Attendant (ATTN) Name handling
+        let attn_name = currentPo.attn_name;
+        if (req.body.attn_name !== undefined) {
+            attn_name = cleanValue(req.body.attn_name) || null;
+            if (!attn_name) {
+                await connection.rollback();
+                return res.status(400).json({ success: false, message: "Attendant (ATTN) Name is required." });
+            }
+        }
+
+        const delivery_address = cleanValue(req.body.delivery_address) || null;
+        const delivery_type = delivery_address ? "DIRECT_SITE" : (req.body.delivery_type === "DIRECT_SITE" ? "DIRECT_SITE" : "OFFICE");
+
+        // Expected Delivery Date handling (timezone-safe, fallback to quotation)
+        let expected_delivery_date = null;
+        if (req.body.expected_delivery_date !== undefined) {
+            expected_delivery_date = formatDateForDb(req.body.expected_delivery_date);
+        } else {
+            expected_delivery_date = formatDateForDb(currentPo.expected_delivery_date || currentPo.viv_expected_delivery_date);
+        }
+
+        // Payment terms (fall back to quotation terms if not entered)
+        let payment_terms_remarks = cleanValue(req.body.payment_terms_remarks);
+        if (!payment_terms_remarks) {
+            payment_terms_remarks = derivePaymentTerms(currentPo);
+        }
+
+        const payment_type = cleanValue(req.body.payment_type) || currentPo.payment_type || currentPo.viv_payment_type || "CREDIT";
+        const advance_type = cleanValue(req.body.advance_type) || currentPo.advance_type || null;
+        const advance_value = req.body.advance_value !== undefined && req.body.advance_value !== null && req.body.advance_value !== ""
+            ? Number(req.body.advance_value)
+            : (currentPo.advance_value !== null ? currentPo.advance_value : currentPo.viv_advance_value);
+        const balance_due_days = req.body.balance_due_days !== undefined && req.body.balance_due_days !== null && req.body.balance_due_days !== ""
+            ? Number(req.body.balance_due_days)
+            : (currentPo.balance_due_days !== null ? currentPo.balance_due_days : currentPo.viv_balance_due_days);
+        const product_remarks = req.body.product_remarks !== undefined ? cleanValue(req.body.product_remarks) : currentPo.product_remarks;
+
+        let newRevision = currentPo.revision_number || 0;
+        let isRevised = false;
+        if (currentPo.status === "ISSUED") {
+            newRevision += 1;
+            isRevised = true;
+        }
+
+        await connection.execute(`
+            UPDATE purchase_orders SET
+                make = ?,
+                model = ?,
+                qty = ?,
+                sales_rate = ?,
+                price_per_unit = ?,
+                total_price = ?,
+                taxable_value = ?,
+                attn_name = ?,
+                delivery_type = ?,
+                delivery_address = ?,
+                expected_delivery_date = ?,
+                payment_type = ?,
+                advance_type = ?,
+                advance_value = ?,
+                balance_due_days = ?,
+                payment_terms_remarks = ?,
+                product_remarks = ?,
+                revision_number = ?
+            WHERE po_id = ?
+        `, [
+            make,
+            model,
+            newQty,
+            newSalesRate,
+            newPricePerUnit,
+            newTotalPrice,
+            newTaxableValue,
+            attn_name,
+            delivery_type,
+            delivery_address,
+            expected_delivery_date,
+            payment_type,
+            advance_type,
+            advance_value,
+            balance_due_days,
+            payment_terms_remarks,
+            product_remarks,
+            newRevision,
+            poId
+        ]);
+
+        const updatedPo = {
+            ...currentPo,
+            make,
+            model,
+            qty: newQty,
+            sales_rate: newSalesRate,
+            price_per_unit: newPricePerUnit,
+            total_price: newTotalPrice,
+            taxable_value: newTaxableValue,
+            attn_name,
+            delivery_type,
+            delivery_address,
+            expected_delivery_date,
+            payment_type,
+            advance_type,
+            advance_value,
+            balance_due_days,
+            payment_terms_remarks,
+            product_remarks,
+            revision_number: newRevision
+        };
+
+        if (currentPo.status === "ISSUED") {
+            const pdfPath = await generatePoPdf(updatedPo);
+            const relPath = path.relative(__dirname, pdfPath).replace(/\\/g, "/");
+            await connection.execute(
+                `UPDATE purchase_orders SET issued_po_path = ? WHERE po_id = ?`,
+                [relPath, poId]
+            );
+        }
+
+        await connection.commit();
+
+        const revTag = isRevised ? `to Revision ${newRevision}` : `(Draft)`;
+        const delivDesc = delivery_type === "DIRECT_SITE" ? `Direct to Site: ${delivery_address}` : "At Our Office";
+        await writeReportLog(req, "PO_REVISED",
+            `Purchase Order ${currentPo.po_number} updated ${revTag}. Qty: ${newQty}, Total Price: ${money(newTotalPrice)}. Delivery: ${delivDesc}. Expected: ${dateText(expected_delivery_date)}. ${payment_terms_remarks ? `Terms: ${payment_terms_remarks}` : ""}`
+        );
+
+        return res.json({
+            success: true,
+            message: `Purchase Order updated successfully ${revTag}`,
+            po: updatedPo
+        });
+
+    } catch (error) {
+        await connection.rollback();
+        console.error(error);
+        log(`PO update failed - ${error.message}`);
+        return res.status(500).json({ success: false, message: "Failed to update Purchase Order: " + error.message });
+    } finally {
+        connection.release();
+    }
+});
+
 // POST /purchase-orders/:po_id/issue - Issues a DRAFT purchase order: generates the PDF, marks it ISSUED and returns the PDF as a download
 app.post("/purchase-orders/:po_id/issue", verifyProcurement, async (req, res) => {
     const poId = Number(req.params.po_id);
@@ -6111,6 +6590,28 @@ app.post("/purchase-orders/:po_id/issue", verifyProcurement, async (req, res) =>
             return res.status(409).json({ success: false, message: "PO is not in DRAFT status" });
         }
         const po = rows[0];
+        if (req.body?.attn_name) {
+            po.attn_name = cleanValue(req.body.attn_name) || null;
+            await connection.execute(
+                `UPDATE purchase_orders SET attn_name = ? WHERE po_id = ?`,
+                [po.attn_name, poId]
+            );
+        }
+        if (!po.attn_name || !String(po.attn_name).trim()) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Attendant (ATTN) Name is required to issue the Purchase Order. Please edit the PO and enter the Attendant Name."
+            });
+        }
+        if (req.body?.delivery_type) {
+            po.delivery_type = req.body.delivery_type === "DIRECT_SITE" ? "DIRECT_SITE" : "OFFICE";
+            po.delivery_address = po.delivery_type === "DIRECT_SITE" ? (cleanValue(req.body.delivery_address) || null) : null;
+            await connection.execute(
+                `UPDATE purchase_orders SET delivery_type = ?, delivery_address = ? WHERE po_id = ?`,
+                [po.delivery_type, po.delivery_address, poId]
+            );
+        }
         const pdfPath = await generatePoPdf(po);
         const relPath = path.relative(__dirname, pdfPath).replace(/\\/g, "/");
         await connection.execute(
@@ -6162,9 +6663,16 @@ app.get("/purchase-orders/:po_id/download", verifyProcurement, async (req, res) 
                 COALESCE(po.vendor_address, vom.office_address) AS vendor_address,
                 vom.gst_number AS vendor_gst,
                 vom.office_contact_name,
-                vom.office_contact_number
+                vom.office_contact_number,
+                viv.payment_type AS viv_payment_type,
+                viv.advance_value AS viv_advance_value,
+                viv.balance_due_days AS viv_balance_due_days,
+                viv.payment_terms_remarks AS viv_payment_terms_remarks,
+                viv.expected_delivery_date AS viv_expected_delivery_date,
+                viv.remarks AS quotation_remarks
              FROM purchase_orders po
              LEFT JOIN vendor_oem_masters vom ON vom.vendor_id = po.vendor_id
+             LEFT JOIN vendor_inquiry_vendors viv ON viv.inquiry_vendor_id = po.inquiry_vendor_id
              WHERE po.po_id = ? LIMIT 1`,
             [poId]
         );

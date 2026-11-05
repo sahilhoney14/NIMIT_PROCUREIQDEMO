@@ -5,6 +5,7 @@
  */
 
 const http = require("http");
+const PORT = process.env.PORT || 5000;
 
 function request(options, data, headers = {}) {
     return new Promise((resolve, reject) => {
@@ -71,19 +72,19 @@ async function runSuite() {
     console.log("--- 1. AUTHENTICATION & LOGIN GATEWAY TESTS ---");
 
     // 1.1 Unauthenticated login page
-    const loginPage = await request({ hostname: "localhost", port: 3000, path: "/login", method: "GET" });
+    const loginPage = await request({ hostname: "localhost", port: PORT, path: "/login", method: "GET" });
     assert("GET /login returns 200 with HTML login page", loginPage.status === 200 && typeof loginPage.data === "string");
 
     // 1.2 Invalid credentials rejected
-    const badLogin = await request({ hostname: "localhost", port: 3000, path: "/login", method: "POST" }, { username: "admin", password: "WrongPassword!999" });
+    const badLogin = await request({ hostname: "localhost", port: PORT, path: "/login", method: "POST" }, { username: "admin", password: "WrongPassword!999" });
     assert("POST /login with bad credentials returns 401 Unauthorized", badLogin.status === 401 && badLogin.data.success === false);
 
     // 1.3 Missing credentials rejected
-    const emptyLogin = await request({ hostname: "localhost", port: 3000, path: "/login", method: "POST" }, { username: "", password: "" });
+    const emptyLogin = await request({ hostname: "localhost", port: PORT, path: "/login", method: "POST" }, { username: "", password: "" });
     assert("POST /login with empty credentials returns 401", emptyLogin.status === 401 && emptyLogin.data.success === false);
 
     // 1.4 Admin Login
-    const adminLogin = await request({ hostname: "localhost", port: 3000, path: "/login", method: "POST" }, { username: "admin", password: "Password@123" });
+    const adminLogin = await request({ hostname: "localhost", port: PORT, path: "/login", method: "POST" }, { username: "admin", password: "Password@123" });
     assert("POST /login as ADMIN returns 200 with JWT tokens", adminLogin.status === 200 && adminLogin.data.success === true && adminLogin.data.role === "ADMIN");
     const adminToken = adminLogin.data.token;
     const adminCookies = adminLogin.cookies;
@@ -95,7 +96,7 @@ async function runSuite() {
     assert("Auth cookies contain SameSite=Lax flag", hasSameSite);
 
     // 1.5 Procurement Login
-    const procLogin = await request({ hostname: "localhost", port: 3000, path: "/login", method: "POST" }, { username: "procurement", password: "Password@123" });
+    const procLogin = await request({ hostname: "localhost", port: PORT, path: "/login", method: "POST" }, { username: "user1", password: "Password@123" });
     assert("POST /login as PROCUREMENT returns 200", procLogin.status === 200 && procLogin.data.role === "PROCUREMENT");
     const procToken = procLogin.data.token;
 
@@ -105,13 +106,13 @@ async function runSuite() {
     console.log("\n--- 2. UNAUTHENTICATED ACCESS PREVENTION (EXPECT 401 / REDIRECT) ---");
 
     // HTML route without auth redirects
-    const anonAdminHtml = await request({ hostname: "localhost", port: 3000, path: "/admin", method: "GET", headers: { "Accept": "text/html" } });
+    const anonAdminHtml = await request({ hostname: "localhost", port: PORT, path: "/admin", method: "GET", headers: { "Accept": "text/html" } });
     assert("GET /admin (HTML) without token redirects to /?reason=unauthenticated", anonAdminHtml.status === 302 && anonAdminHtml.headers.location === "/?reason=unauthenticated");
 
-    const anonManagerHtml = await request({ hostname: "localhost", port: 3000, path: "/procurement-manager", method: "GET", headers: { "Accept": "text/html" } });
+    const anonManagerHtml = await request({ hostname: "localhost", port: PORT, path: "/procurement-manager", method: "GET", headers: { "Accept": "text/html" } });
     assert("GET /procurement-manager (HTML) without token redirects", anonManagerHtml.status === 302 && anonManagerHtml.headers.location === "/?reason=unauthenticated");
 
-    const anonProcHtml = await request({ hostname: "localhost", port: 3000, path: "/procurement", method: "GET", headers: { "Accept": "text/html" } });
+    const anonProcHtml = await request({ hostname: "localhost", port: PORT, path: "/procurement", method: "GET", headers: { "Accept": "text/html" } });
     assert("GET /procurement (HTML) without token redirects", anonProcHtml.status === 302 && anonProcHtml.headers.location === "/?reason=unauthenticated");
 
     // API routes without auth return 401
@@ -130,7 +131,7 @@ async function runSuite() {
     ];
 
     for (const r of unauthRoutes) {
-        const res = await request({ hostname: "localhost", port: 3000, path: r.path, method: r.method });
+        const res = await request({ hostname: "localhost", port: PORT, path: r.path, method: r.method });
         assert(`Unauthenticated ${r.method} ${r.path} returns 401`, res.status === 401, `got status ${res.status}`);
     }
 
@@ -151,7 +152,7 @@ async function runSuite() {
 
     for (const route of procOnAdminRoutes) {
         const res = await request(
-            { hostname: "localhost", port: 3000, path: route, method: "GET" },
+            { hostname: "localhost", port: PORT, path: route, method: "GET" },
             null,
             { "Authorization": `Bearer ${procToken}` }
         );
@@ -160,28 +161,28 @@ async function runSuite() {
 
     // Authorized Admin Access (expect 200 OK across all portals and sensitive routes)
     const adminUsers = await request(
-        { hostname: "localhost", port: 3000, path: "/users", method: "GET" },
+        { hostname: "localhost", port: PORT, path: "/users", method: "GET" },
         null,
         { "Authorization": `Bearer ${adminToken}` }
     );
     assert("ADMIN role accessing /users returns 200 OK", adminUsers.status === 200 && (Array.isArray(adminUsers.data) || Array.isArray(adminUsers.data?.users)));
 
     const adminVendorsAll = await request(
-        { hostname: "localhost", port: 3000, path: "/vendors/all", method: "GET" },
+        { hostname: "localhost", port: PORT, path: "/vendors/all", method: "GET" },
         null,
         { "Authorization": `Bearer ${adminToken}` }
     );
     assert("ADMIN role accessing /vendors/all returns 200 OK", adminVendorsAll.status === 200 && adminVendorsAll.data.success === true);
 
     const adminAuditLogs = await request(
-        { hostname: "localhost", port: 3000, path: "/audit-logs", method: "GET" },
+        { hostname: "localhost", port: PORT, path: "/audit-logs", method: "GET" },
         null,
         { "Authorization": `Bearer ${adminToken}` }
     );
     assert("ADMIN role accessing /audit-logs returns 200 OK", adminAuditLogs.status === 200 && adminAuditLogs.data.success === true);
 
     const adminLoginLogs = await request(
-        { hostname: "localhost", port: 3000, path: "/login-logs", method: "GET" },
+        { hostname: "localhost", port: PORT, path: "/login-logs", method: "GET" },
         null,
         { "Authorization": `Bearer ${adminToken}` }
     );
@@ -189,14 +190,14 @@ async function runSuite() {
 
     // Authorized Procurement Access (expect 200 OK)
     const procOrderTracking = await request(
-        { hostname: "localhost", port: 3000, path: "/order-tracking", method: "GET" },
+        { hostname: "localhost", port: PORT, path: "/order-tracking", method: "GET" },
         null,
         { "Authorization": `Bearer ${procToken}` }
     );
     assert("PROCUREMENT role accessing /order-tracking returns 200 OK", procOrderTracking.status === 200 && procOrderTracking.data.success === true);
 
     const procVendors = await request(
-        { hostname: "localhost", port: 3000, path: "/vendors", method: "GET" },
+        { hostname: "localhost", port: PORT, path: "/vendors", method: "GET" },
         null,
         { "Authorization": `Bearer ${procToken}` }
     );
@@ -218,7 +219,7 @@ async function runSuite() {
     for (const payload of sqliPayloads) {
         const encoded = encodeURIComponent(payload);
         const res = await request(
-            { hostname: "localhost", port: 3000, path: `/order-tracking?search=${encoded}`, method: "GET" },
+            { hostname: "localhost", port: PORT, path: `/order-tracking?search=${encoded}`, method: "GET" },
             null,
             { "Authorization": `Bearer ${procToken}` }
         );
@@ -232,7 +233,7 @@ async function runSuite() {
 
     // Rejection of invalid vendor numeric names
     const invalidVendor = await request(
-        { hostname: "localhost", port: 3000, path: "/vendors", method: "POST" },
+        { hostname: "localhost", port: PORT, path: "/vendors", method: "POST" },
         { vendor_data: JSON.stringify({ vendor_name: "12345678", office_contact_name: "999" }) },
         { "Authorization": `Bearer ${procToken}` }
     );
@@ -240,7 +241,7 @@ async function runSuite() {
 
     // Rejection of invalid phone numbers
     const invalidPhoneVendor = await request(
-        { hostname: "localhost", port: 3000, path: "/vendors", method: "POST" },
+        { hostname: "localhost", port: PORT, path: "/vendors", method: "POST" },
         { vendor_data: JSON.stringify({ vendor_name: "Valid Corp", office_contact_number: "123" }) },
         { "Authorization": `Bearer ${procToken}` }
     );
@@ -251,14 +252,14 @@ async function runSuite() {
     // -------------------------------------------------------------------------
     console.log("\n--- 6. TOKEN REVOCATION & SESSION LIFECYCLE ---");
 
-    // Login a dedicated temporary user to test logout
-    const tempLogin = await request({ hostname: "localhost", port: 3000, path: "/login", method: "POST" }, { username: "procurement", password: "Password@123" });
+    // Login a dedicated temporary user to test logout (user2)
+    const tempLogin = await request({ hostname: "localhost", port: PORT, path: "/login", method: "POST" }, { username: "user2", password: "Password@123" });
     const tempToken = tempLogin.data.token;
     const tempCookie = extractCookie(tempLogin.cookies, "jwt_token");
 
     // Verify token works
     const verifyBefore = await request(
-        { hostname: "localhost", port: 3000, path: "/verify", method: "GET" },
+        { hostname: "localhost", port: PORT, path: "/verify", method: "GET" },
         null,
         { "Authorization": `Bearer ${tempToken}` }
     );
@@ -266,7 +267,7 @@ async function runSuite() {
 
     // Logout
     const logoutRes = await request(
-        { hostname: "localhost", port: 3000, path: "/logout", method: "POST" },
+        { hostname: "localhost", port: PORT, path: "/logout", method: "POST" },
         null,
         { "Authorization": `Bearer ${tempToken}`, "Cookie": tempCookie }
     );
@@ -274,7 +275,7 @@ async function runSuite() {
 
     // Verify token is NOW REVOKED (token_version was incremented)
     const verifyAfter = await request(
-        { hostname: "localhost", port: 3000, path: "/verify", method: "GET" },
+        { hostname: "localhost", port: PORT, path: "/verify", method: "GET" },
         null,
         { "Authorization": `Bearer ${tempToken}` }
     );

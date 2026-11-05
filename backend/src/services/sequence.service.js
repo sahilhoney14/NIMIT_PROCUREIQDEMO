@@ -27,7 +27,7 @@ async function generatePrNumber(connection) {
 }
 
 async function generatePoNumber(connection, prNumber) {
-    return prNumber.replace("/PR/", "/PO/");
+    return prNumber.replace("/PR/", "/PROC/");
 }
 
 module.exports = {

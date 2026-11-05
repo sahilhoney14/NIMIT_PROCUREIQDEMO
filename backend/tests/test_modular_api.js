@@ -1,10 +1,12 @@
 const http = require("http");
+const PORT = process.env.PORT || 5000;
+const BASE_URL = `http://localhost:${PORT}`;
 
 async function testModularApi() {
     console.log("=== TESTING MODULAR /API ROUTES ===");
 
     // 1. Login as Admin
-    const loginRes = await fetch("http://localhost:3000/login", {
+    const loginRes = await fetch(`${BASE_URL}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: "admin", password: "Password@123" })
@@ -25,7 +27,7 @@ async function testModularApi() {
 
     for (const r of routes) {
         try {
-            const res = await fetch(`http://localhost:3000${r.path}`, {
+            const res = await fetch(`${BASE_URL}${r.path}`, {
                 method: r.method,
                 headers
             });

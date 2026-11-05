@@ -1,13 +1,14 @@
 const http = require("http");
+const PORT = process.env.PORT || 5000;
 
 async function runUploadSecurityTests() {
     console.log("=== TESTING FILE UPLOAD SECURITY HARDENING ===");
 
     // Login as Procurement
-    const loginRes = await fetch("http://localhost:3000/login", {
+    const loginRes = await fetch(`http://localhost:${PORT}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: "procurement", password: "Password@123" })
+        body: JSON.stringify({ username: "user1", password: "Password@123" })
     });
     const { token } = await loginRes.json();
 
@@ -22,7 +23,7 @@ async function runUploadSecurityTests() {
         `--${boundary}--`
     ].join("\r\n");
 
-    const exeRes = await fetch("http://localhost:3000/purchase-requests/import-preview", {
+    const exeRes = await fetch(`http://localhost:${PORT}/purchase-requests/import-preview`, {
         method: "POST",
         headers: {
             "Authorization": `Bearer ${token}`,
@@ -51,7 +52,7 @@ async function runUploadSecurityTests() {
         `--${boundary}--`
     ].join("\r\n");
 
-    const phpRes = await fetch("http://localhost:3000/vendors/import-preview", {
+    const phpRes = await fetch(`http://localhost:${PORT}/vendors/import-preview`, {
         method: "POST",
         headers: {
             "Authorization": `Bearer ${token}`,
@@ -82,7 +83,7 @@ async function runUploadSecurityTests() {
     const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     formData.append("file", blob, "test_pr.xlsx");
 
-    const validExcelRes = await fetch("http://localhost:3000/purchase-requests/import-preview", {
+    const validExcelRes = await fetch(`http://localhost:${PORT}/purchase-requests/import-preview`, {
         method: "POST",
         headers: {
             "Authorization": `Bearer ${token}`

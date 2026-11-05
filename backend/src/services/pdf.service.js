@@ -76,7 +76,7 @@ function generatePoPdf(po) {
             rect(ML, vendorY, MW, vendorH);
 
             const splitX = 316.3; // Matches lower table column 2 border cleanly
-            const colDivider = 416; // Divider between Label and Value in PO table
+            const colDivider = 390; // Balanced divider giving ~74pt for labels and ~126pt for dynamic values
 
             line(splitX, vendorY, splitX, vendorY + vendorH);
             line(colDivider, vendorY, colDivider, vendorY + vendorH);
@@ -89,47 +89,83 @@ function generatePoPdf(po) {
 
             let vendorTextY = vendorY + 16;
             if (vendorName) {
-                doc.font("Arial-Bold").fontSize(8.5).text(vendorName, ML + 4, vendorTextY, { width: splitX - ML - 8, lineBreak: false });
+                let nameSize = 8.5;
+                doc.font("Arial-Bold");
+                while (nameSize > 6.5 && doc.fontSize(nameSize).widthOfString(vendorName) > splitX - ML - 8) {
+                    nameSize -= 0.2;
+                }
+                doc.fontSize(nameSize).text(vendorName, ML + 4, vendorTextY, { width: splitX - ML - 8, lineBreak: false });
                 vendorTextY += 12;
             }
             if (vendorAddress) {
-                doc.font("Arial").fontSize(8).text(vendorAddress, ML + 4, vendorTextY, { width: splitX - ML - 8, lineGap: 1 });
-                const addrH = doc.heightOfString(vendorAddress, { width: splitX - ML - 8, lineGap: 1 });
+                let addrSize = 8.0;
+                doc.font("Arial");
+                let addrH = doc.fontSize(addrSize).heightOfString(vendorAddress, { width: splitX - ML - 8, lineGap: 1 });
+                while (addrH > 38 && addrSize > 6.5) {
+                    addrSize -= 0.3;
+                    addrH = doc.fontSize(addrSize).heightOfString(vendorAddress, { width: splitX - ML - 8, lineGap: 1 });
+                }
+                doc.fontSize(addrSize).text(vendorAddress, ML + 4, vendorTextY, { width: splitX - ML - 8, lineGap: 1 });
                 vendorTextY += addrH + 4;
             }
             if (vendorGst) {
-                doc.font("Arial-Bold").fontSize(8.5).text(`GST: ${vendorGst}`, ML + 4, vendorTextY, { width: splitX - ML - 8, lineBreak: false });
+                doc.font("Arial-Bold").fontSize(8.5).text(`GST: ${vendorGst}`, ML + 4, Math.min(vendorTextY, vendorY + vendorH - 12), { width: splitX - ML - 8, lineBreak: false });
             }
 
-            // Right: Order References Table (6 rows x 14pt height = 84pt)
-            const companyGst = process.env.GST_NUMBER || "24AAHPS5083K1ZO";
-            const rowH = 14;
+            // Right: Order References Table (4 rows x 21pt height = 84pt)
+            const companyGst = process.env.GST_NUMBER || "24AMHPS5080K1ZO";
+            const rowH = 21;
+            const poNumberDisplay = (po.revision_number && Number(po.revision_number) > 0)
+                ? `${po.po_number || "-"} - Rev ${po.revision_number}`
+                : (po.po_number || "-");
             const refRows = [
-                { label: "REF. P.O. NO.", val: po.po_number || "-", boldVal: true },
+                { label: "REF. P.O. NO.", val: poNumberDisplay, boldVal: true },
                 { label: "P.O. DATE",      val: fmtDate(po.po_date || po.created_at) },
-                { label: "REF. P.R. NO.", val: po.pr_number || "-" },
-                { label: "P.R. DATE",      val: fmtDate(po.pr_date || po.created_at) },
                 { label: "GST NO.",        val: companyGst },
                 { label: "VENDOR CODE",    val: po.vendor_code || "-" }
             ];
+
+            const availLabelWidth = colDivider - splitX - 6;
+            const availValWidth = MR - colDivider - 8;
 
             refRows.forEach((r, idx) => {
                 const currentY = vendorY + idx * rowH;
                 if (idx > 0) {
                     line(splitX, currentY, MR, currentY);
                 }
-                const textY = currentY + 3.2;
-                // Label
-                doc.font("Arial-Bold").fontSize(8.2).text(r.label, splitX + 4, textY, { width: colDivider - splitX - 6, lineBreak: false });
-                // Value
-                doc.font(r.boldVal ? "Arial-Bold" : "Arial").fontSize(8.2).text(r.val, colDivider + 4, textY, { width: MR - colDivider - 6, lineBreak: false });
+                const textY = currentY + 6;
+
+                // Dynamically fit label if necessary
+                let labelFontSize = 8.2;
+                doc.font("Arial-Bold");
+                while (labelFontSize > 6.5 && doc.fontSize(labelFontSize).widthOfString(r.label) > availLabelWidth) {
+                    labelFontSize -= 0.2;
+                }
+                doc.fontSize(labelFontSize).text(r.label, splitX + 4, textY, { width: availLabelWidth, lineBreak: false });
+
+                // Dynamically fit value (auto-scale font size down to ensure it NEVER wraps onto 2nd line)
+                const valStr = String(r.val || "").trim();
+                let valFontSize = 8.2;
+                doc.font(r.boldVal ? "Arial-Bold" : "Arial");
+                while (valFontSize > 6.0 && doc.fontSize(valFontSize).widthOfString(valStr) > availValWidth) {
+                    valFontSize -= 0.2;
+                }
+                const adjustedValY = textY + (valFontSize < 8.0 ? (8.2 - valFontSize) * 0.3 : 0);
+                doc.fontSize(valFontSize).text(valStr, colDivider + 4, adjustedValY, { width: availValWidth, lineBreak: false });
             });
 
             // 4. Attention Box
             const attnY = 298.1;
             const attnH = 21.5;
             rect(ML, attnY, MW, attnH);
-            doc.font("Arial-Bold").fontSize(9).text(`ATTN. : ${po.vendor_name || ""}`, ML, attnY + 5.5, {
+            const attnPerson = String(po.attn_name || po.office_contact_name || "").trim();
+            const attnText = `ATTN. : ${attnPerson}`;
+            let attnSize = 9.0;
+            doc.font("Arial-Bold");
+            while (attnSize > 6.5 && doc.fontSize(attnSize).widthOfString(attnText) > MW - 12) {
+                attnSize -= 0.2;
+            }
+            doc.fontSize(attnSize).text(attnText, ML, attnY + 5.5, {
                 width: MW,
                 align: "center",
                 lineBreak: false
@@ -164,10 +200,25 @@ function generatePoPdf(po) {
 
             // Item row
             const itemTop = tableHeaderY + headerH;
-            const itemDesc = [po.item_name, po.make, po.model].filter(Boolean).join(" / ");
             doc.font("Calibri").fontSize(7.56);
             doc.text("1", x0, itemTop + 4, { width: x1 - x0, align: "center", lineBreak: false });
-            doc.text(itemDesc, x1 + 4, itemTop + 4, { width: x2 - x1 - 8, align: "left", lineBreak: false });
+
+            // Item Name on top, next line make, and below that model no
+            let currentItemY = itemTop + 4;
+            const descWidth = x2 - x1 - 8;
+            if (po.item_name) {
+                doc.font("Calibri-Bold").fontSize(7.56).text(po.item_name, x1 + 4, currentItemY, { width: descWidth, lineGap: 1 });
+                currentItemY += doc.heightOfString(po.item_name, { width: descWidth, lineGap: 1 }) + 2;
+            }
+            if (po.make) {
+                doc.font("Calibri").fontSize(7.56).text(po.make, x1 + 4, currentItemY, { width: descWidth, lineGap: 1 });
+                currentItemY += doc.heightOfString(po.make, { width: descWidth, lineGap: 1 }) + 2;
+            }
+            if (po.model) {
+                doc.font("Calibri").fontSize(7.56).text(po.model, x1 + 4, currentItemY, { width: descWidth, lineGap: 1 });
+            }
+
+            doc.font("Calibri").fontSize(7.56);
             doc.text(Number(po.qty || 0).toFixed(2), x2, itemTop + 4, { width: x3 - x2, align: "center", lineBreak: false });
             doc.text(fmtCur(po.price_per_unit), x3, itemTop + 4, { width: x4 - x3, align: "center", lineBreak: false });
             doc.text(fmtCur(po.total_price), x4, itemTop + 4, { width: x5 - x4, align: "center", lineBreak: false });
@@ -188,14 +239,88 @@ function generatePoPdf(po) {
             line(x0, 607.5, x5, 607.5);
 
             doc.font("Calibri-Bold").fontSize(7.56).text("TERMS & CONDITIONS :", x0, footerY + 3.5, { width: footerSplit - x0, align: "center", lineBreak: false });
-            doc.font("Calibri").fontSize(7.56);
-            doc.text("1", x0, footerY + 19, { width: x1 - x0, align: "center", lineBreak: false });
-            doc.text("2", x0, footerY + 31, { width: x1 - x0, align: "center", lineBreak: false });
-            doc.text("DELIVERY : AT OUR OFFICE.", x1 + 4, footerY + 19, { width: footerSplit - x1 - 8, lineBreak: false });
-            doc.text("TAX : EXTRA", x1 + 4, footerY + 31, { width: footerSplit - x1 - 8, lineBreak: false });
-            if (po.payment_terms_remarks) {
-                doc.text("3", x0, footerY + 43, { width: x1 - x0, align: "center", lineBreak: false });
-                doc.text(po.payment_terms_remarks, x1 + 4, footerY + 43, { width: footerSplit - x1 - 8, lineBreak: false });
+
+            const termWidth = footerSplit - x1 - 8;
+
+            // Condition 1: DELIVERY
+            let cleanAddr = String(po.delivery_address || "").trim();
+            cleanAddr = cleanAddr
+                .replace(/^delivery\s*:\s*/i, "")
+                .replace(/^direct\s*to\s*site\s*[-:]*\s*/i, "")
+                .replace(/\s+,/g, ",")
+                .replace(/\r?\n/g, ", ")
+                .replace(/\s+/g, " ")
+                .trim();
+
+            const deliveryText = (po.delivery_type === "DIRECT_SITE" && cleanAddr)
+                ? `DELIVERY : ${cleanAddr}`
+                : "DELIVERY : AT OUR OFFICE.";
+
+            // Condition 3: PAYMENT TERMS (from custom remarks or quotation terms)
+            const term3 = (po.payment_terms_remarks && String(po.payment_terms_remarks).trim())
+                ? String(po.payment_terms_remarks).trim()
+                : (function() {
+                    const type = String(po.payment_type || po.viv_payment_type || "").toUpperCase();
+                    const advVal = (po.advance_value !== null && po.advance_value !== undefined && po.advance_value !== "")
+                        ? Number(po.advance_value)
+                        : (po.viv_advance_value ? Number(po.viv_advance_value) : null);
+                    const dueDays = (po.balance_due_days !== null && po.balance_due_days !== undefined && po.balance_due_days !== "")
+                        ? Number(po.balance_due_days)
+                        : (po.viv_balance_due_days ? Number(po.viv_balance_due_days) : null);
+                    const hasAdv = advVal !== null && advVal > 0;
+                    const hasDays = dueDays !== null && dueDays > 0;
+
+                    if (type === "ADVANCE" || (hasAdv && advVal >= 100)) {
+                        return advVal
+                            ? `Payment will be ${advVal}% advance.`
+                            : "Payment will be 100% advance.";
+                    }
+                    if (type === "ADVANCE_PLUS_BALANCE" || (hasAdv && hasDays)) {
+                        const adv = hasAdv ? `${advVal}% advance` : "advance";
+                        const bal = hasDays ? `balance payment after ${dueDays} days` : "balance on delivery";
+                        return `Payment will be ${adv}, ${bal}.`;
+                    }
+                    if (hasDays) {
+                        return `Payment will be ${dueDays} days credit.`;
+                    }
+                    if (po.viv_payment_terms_remarks && String(po.viv_payment_terms_remarks).trim()) {
+                        return String(po.viv_payment_terms_remarks).trim();
+                    }
+                    if (po.viv_remarks && String(po.viv_remarks).trim()) {
+                        return String(po.viv_remarks).trim();
+                    }
+                    return null;
+                })();
+
+            // Dynamic adjustment of font size & lineGap so all conditions fit comfortably without border collision
+            let termsFontSize = 7.56;
+            let lineGap = 1.5;
+            doc.font("Calibri").fontSize(termsFontSize);
+            let estimatedH = doc.heightOfString(deliveryText, { width: termWidth, lineGap }) + 12 + (term3 ? doc.heightOfString(term3, { width: termWidth, lineGap }) + 4 : 0);
+            while (estimatedH > 58 && termsFontSize > 6.2) {
+                termsFontSize -= 0.3;
+                lineGap = 1.0;
+                doc.fontSize(termsFontSize);
+                estimatedH = doc.heightOfString(deliveryText, { width: termWidth, lineGap }) + 11 + (term3 ? doc.heightOfString(term3, { width: termWidth, lineGap }) + 3 : 0);
+            }
+
+            doc.font("Calibri").fontSize(termsFontSize);
+            let currentTermY = footerY + 18;
+
+            // Condition 1: DELIVERY
+            doc.text("1", x0, currentTermY, { width: x1 - x0, align: "center", lineBreak: false });
+            doc.text(deliveryText, x1 + 4, currentTermY, { width: termWidth, lineGap });
+            const delivH = doc.heightOfString(deliveryText, { width: termWidth, lineGap });
+            currentTermY += Math.max(delivH, 9) + 3;
+
+            // Condition 2: TAX
+            doc.text("2", x0, currentTermY, { width: x1 - x0, align: "center", lineBreak: false });
+            doc.text("TAX : EXTRA", x1 + 4, currentTermY, { width: termWidth, lineBreak: false });
+            currentTermY += 12;
+
+            if (term3) {
+                doc.text("3", x0, currentTermY, { width: x1 - x0, align: "center", lineBreak: false });
+                doc.text(term3, x1 + 4, currentTermY, { width: termWidth, lineGap });
             }
 
             // Signature block

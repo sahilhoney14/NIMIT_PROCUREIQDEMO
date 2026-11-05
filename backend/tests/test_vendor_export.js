@@ -1,6 +1,7 @@
 const ExcelJS = require('exceljs');
 
-const BASE_URL = 'http://localhost:3000';
+const PORT = process.env.PORT || 5000;
+const BASE_URL = `http://localhost:${PORT}`;
 
 async function runVendorExportTests() {
     console.log('======================================================');
@@ -113,10 +114,10 @@ async function runVendorExportTests() {
         assert(false, `PDF export test failed: ${e.message}`);
     }
 
-    // 5. Filtered Excel export (role=Trader)
+    // 5. Filtered Excel export (search=Solutions)
     try {
-        const res = await fetch(`${BASE_URL}/vendors/export/excel?role=Trader`, { headers: authHeaders });
-        assert(res.status === 200, 'Filtered GET /vendors/export/excel?role=Trader returned 200');
+        const res = await fetch(`${BASE_URL}/vendors/export/excel?search=Solutions`, { headers: authHeaders });
+        assert(res.status === 200, 'Filtered GET /vendors/export/excel?search=Solutions returned 200');
         const arrayBuf = await res.arrayBuffer();
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(Buffer.from(arrayBuf));

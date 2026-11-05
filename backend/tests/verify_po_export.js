@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
-const ExcelJS = require('c:/Users/sahil/Documents/NIMIT_PROCUREIQ/NIMIT_PROCUREIQ/backend/node_modules/exceljs');
+const ExcelJS = require('exceljs');
+const PORT = process.env.PORT || 5000;
 
 console.log('=== TEST SUITE: PURCHASE ORDERS EXPORT ===');
 
@@ -29,7 +30,7 @@ function request(options, body) {
         // 1. Login as Admin
         const loginRes = await request({
             hostname: 'localhost',
-            port: 3000,
+            port: PORT,
             path: '/login',
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
@@ -44,7 +45,7 @@ function request(options, body) {
         // 2. Export All POs
         const exportAllRes = await request({
             hostname: 'localhost',
-            port: 3000,
+            port: PORT,
             path: '/purchase-orders/export',
             method: 'GET',
             headers: { 'Authorization': `Bearer ${loginJson.token}` }
@@ -69,7 +70,7 @@ function request(options, body) {
         const expectedHeaders = [
             "S.No", "PO Number", "PO Date", "PO Status", "PR Number", "PR Date",
             "Party / Client Name", "Location", "Territory", "Product Category",
-            "Item Name", "Make", "Model", "Quantity", "Unit", "PR Sales Rate (₹)",
+            "Sub Product Category", "Item Name", "Make", "Model", "Quantity", "Unit", "PR Sales Rate (₹)",
             "PR Taxable Value (₹)", "Vendor Code", "Vendor Name", "Commercial Role",
             "Vendor GSTIN", "Vendor Contact Person", "Vendor Phone", "Vendor Purchase Rate (₹)",
             "Total PO Amount (₹)", "Savings / Margin (₹)", "Margin %", "Expected Delivery Date",
@@ -111,7 +112,7 @@ function request(options, body) {
         // 3. Test Filtered Export (COMPLETED)
         const exportCompletedRes = await request({
             hostname: 'localhost',
-            port: 3000,
+            port: PORT,
             path: '/purchase-orders/export?status=COMPLETED',
             method: 'GET',
             headers: { 'Authorization': `Bearer ${loginJson.token}` }
@@ -123,9 +124,10 @@ function request(options, body) {
         console.log('✔ GET /purchase-orders/export?status=COMPLETED returned HTTP 200');
 
         // 4. Verify Frontend Files
-        const adminHtml = fs.readFileSync('frontend/admin/index.html', 'utf8');
-        const adminJs = fs.readFileSync('frontend/admin/script.js', 'utf8');
-        const adminCss = fs.readFileSync('frontend/admin/style.css', 'utf8');
+        const path = require('path');
+        const adminHtml = fs.readFileSync(path.resolve(__dirname, '../../frontend/admin/index.html'), 'utf8');
+        const adminJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/admin/script.js'), 'utf8');
+        const adminCss = fs.readFileSync(path.resolve(__dirname, '../../frontend/admin/style.css'), 'utf8');
 
         if (!adminHtml.includes('id="poExportBtn"')) throw new Error('poExportBtn missing in admin/index.html');
         if (!adminJs.includes('poExportBtn')) throw new Error('poExportBtn handler missing in admin/script.js');

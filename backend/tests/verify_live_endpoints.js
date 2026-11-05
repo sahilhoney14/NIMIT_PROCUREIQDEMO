@@ -135,7 +135,7 @@ async function runLiveAudit() {
         { path: "/users", desc: "Users Registry (Admin)" },
         { path: "/vendors", desc: "Approved Vendors List" },
         { path: "/vendors/all", desc: "All Vendors Master (Admin)" },
-        { path: "/vendors/check-gst?gst_number=24AAHPS5083K1ZO", desc: "Check GST Registry" },
+        { path: "/vendors/check-gst?gst_number=24AMHPS5080K1ZO", desc: "Check GST Registry" },
         { path: "/vendor-inquiries", desc: "Vendor Inquiries (RFQs)" },
         { path: "/quotation-comparisons", desc: "Quotation & Comparisons" },
         { path: "/purchase-orders", desc: "Purchase Orders" },
@@ -230,6 +230,66 @@ async function runLiveAudit() {
             const res = await request({ path: "/management-insights", token: procToken });
             check("Procurement role blocked from /management-insights (403)", res.status === 403, `HTTP ${res.status}`);
         } catch (e) { check("Procurement role /management-insights check", false, e.message); }
+    }
+
+    // 6. Interactive Purchase Order API & Dynamic Lifecycle
+    console.log(`\n-- Purchase Order Operations, Editing & PDF Generation --`);
+    try {
+        const poRes = await request({ path: "/purchase-orders", token: adminToken });
+        const pos = poRes.data?.purchase_orders || [];
+        if (pos.length > 0) {
+            const testPo = pos[0];
+            const testPoId = testPo.po_id;
+
+            // 6.1 Test PUT /purchase-orders/:id with make, model, qty, sales_rate, attn_name
+            const editRes = await request({
+                method: "PUT",
+                path: `/purchase-orders/${testPoId}`,
+                token: adminToken,
+                body: {
+                    qty: 15,
+                    sales_rate: 4500,
+                    make: "Cisco Enterprise",
+                    model: "CBS350-24T-4G",
+                    attn_name: "Mr. Sunil Varma"
+                }
+            });
+            const editOk = editRes.status === 200 &&
+                Number(editRes.data?.po?.qty) === 15 &&
+                Number(editRes.data?.po?.sales_rate) === 4500 &&
+                Number(editRes.data?.po?.total_price) === 67500 &&
+                editRes.data?.po?.make === "Cisco Enterprise" &&
+                editRes.data?.po?.model === "CBS350-24T-4G" &&
+                editRes.data?.po?.attn_name === "Mr. Sunil Varma";
+            check("PUT /purchase-orders/:id (Edit Make, Model, Qty, Rate, ATTN)", editOk, `Total: ${editRes.data?.po?.total_price}, Make: ${editRes.data?.po?.make}, Model: ${editRes.data?.po?.model}`);
+
+            // 6.2 Test PDF Download
+            const dlRes = await request({ path: `/purchase-orders/${testPoId}/download`, token: adminToken });
+            const dlOk = dlRes.status === 200 && Buffer.isBuffer(dlRes.data) && dlRes.data.length > 10000;
+            check("GET /purchase-orders/:id/download (Generate PDF)", dlOk, `PDF Size: ${dlRes.data?.length || 0} bytes`);
+        }
+    } catch (e) {
+        check("Purchase Order Lifecycle Operations", false, e.message);
+    }
+
+    // 7. Frontend Static Assets Delivery
+    console.log(`\n-- Frontend Portals & Script Delivery --`);
+    const staticPages = [
+        { path: "/admin", token: adminToken, desc: "Admin Portal HTML" },
+        { path: "/procurement", token: procToken, desc: "Procurement Portal HTML" },
+        { path: "/admin/js/admin.js", token: adminToken, desc: "Admin JavaScript Module" },
+        { path: "/procurement/js/procurement.js", token: procToken, desc: "Procurement JavaScript Module" },
+        { path: "/admin/css/admin.css", token: adminToken, desc: "Admin Stylesheet" },
+        { path: "/procurement/css/procurement.css", token: procToken, desc: "Procurement Stylesheet" }
+    ];
+
+    for (const sp of staticPages) {
+        try {
+            const res = await request({ path: sp.path, token: sp.token });
+            check(`GET ${sp.path}`, res.status === 200, sp.desc);
+        } catch (e) {
+            check(`GET ${sp.path}`, false, e.message);
+        }
     }
 
     console.log(`\n======================================================`);

@@ -1,5 +1,6 @@
 const { db } = require("../src/config/db");
 const { generateAccessToken } = require("../src/services/jwt.service");
+const PORT = process.env.PORT || 5000;
 
 async function run() {
     try {
@@ -14,7 +15,7 @@ async function run() {
         const procToken = generateAccessToken(procUser);
 
         // Test with fetch
-        const resAdmin = await fetch("http://localhost:3000/workspace/dashboard", {
+        const resAdmin = await fetch(`http://localhost:${PORT}/workspace/dashboard`, {
             headers: { Authorization: `Bearer ${adminToken}` }
         });
         console.log("Admin response status:", resAdmin.status);
@@ -30,7 +31,7 @@ async function run() {
             });
         }
 
-        const resProc = await fetch("http://localhost:3000/workspace/dashboard", {
+        const resProc = await fetch(`http://localhost:${PORT}/workspace/dashboard`, {
             headers: { Authorization: `Bearer ${procToken}` }
         });
         console.log("Procurement response status:", resProc.status);
